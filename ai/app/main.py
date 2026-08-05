@@ -33,8 +33,7 @@ app = FastAPI(
     title="MolXAI AI Service",
     description=(
         "FastAPI microservice for the EQ-KA-GCN molecular toxicity prediction model. "
-        "Provides SMILES-based toxicity prediction and GNN attention explainability. "
-        "Currently running in PLACEHOLDER mode — model integration pending."
+        "Provides live SMILES-based toxicity prediction and GNN attention explainability."
     ),
     version=settings.AI_MODEL_VERSION,
     lifespan=lifespan,

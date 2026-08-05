@@ -1,0 +1,22 @@
+{
+  "executionEnvironments": [
+    {
+      "root": "ai",
+      "extraPaths": [
+        "ai/venv/Lib/site-packages",
+        "ai"
+      ]
+    },
+    {
+      "root": "EQ-KA-GCN",
+      "extraPaths": [
+        "EQ-KA-GCN/venv/Lib/site-packages",
+        "EQ-KA-GCN"
+      ]
+    }
+  ],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingModuleSource": "none"
+  }
+}
