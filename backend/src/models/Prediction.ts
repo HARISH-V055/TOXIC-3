@@ -1,34 +1,94 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 
-export type PredictionResult = 'toxic' | 'non-toxic' | 'pending' | 'error';
+export interface ImportantAtom {
+  index: number;
+  element: string;
+  score: number;
+}
 
 export interface ImportantBond {
-  atomA: number;
-  atomB: number;
-  weight: number;
+  source: number;
+  target: number;
+  score: number;
+}
+
+export interface GraphAtom {
+  index: number;
+  element: string;
+  x: number;
+  y: number;
+}
+
+export interface GraphBond {
+  source: number;
+  target: number;
+}
+
+export interface MolecularGraph {
+  atoms: GraphAtom[];
+  bonds: GraphBond[];
 }
 
 export interface IPrediction extends Document {
   _id: mongoose.Types.ObjectId;
   user: mongoose.Types.ObjectId;
   smiles: string;
-  prediction: PredictionResult;
+  prediction: string;
   probability: number | null;
   confidence: number | null;
-  importantAtoms: number[];
+  threshold: number;
+  endpoint: string;
+  inferenceTimeMs: number | null;
+  importantAtoms: ImportantAtom[];
   importantBonds: ImportantBond[];
-  executionTime: number | null;
+  molecularGraph: MolecularGraph;
+  explanationImage: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface IPredictionModel extends Model<IPrediction> {}
 
+const ImportantAtomSchema = new Schema<ImportantAtom>(
+  {
+    index: { type: Number, required: true },
+    element: { type: String, required: true },
+    score: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
 const ImportantBondSchema = new Schema<ImportantBond>(
   {
-    atomA: { type: Number, required: true },
-    atomB: { type: Number, required: true },
-    weight: { type: Number, required: true, min: 0, max: 1 },
+    source: { type: Number, required: true },
+    target: { type: Number, required: true },
+    score: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
+const GraphAtomSchema = new Schema<GraphAtom>(
+  {
+    index: { type: Number, required: true },
+    element: { type: String, required: true },
+    x: { type: Number, required: true },
+    y: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
+const GraphBondSchema = new Schema<GraphBond>(
+  {
+    source: { type: Number, required: true },
+    target: { type: Number, required: true },
+  },
+  { _id: false }
+);
+
+const MolecularGraphSchema = new Schema<MolecularGraph>(
+  {
+    atoms: { type: [GraphAtomSchema], default: [] },
+    bonds: { type: [GraphBondSchema], default: [] },
   },
   { _id: false }
 );
@@ -49,7 +109,6 @@ const PredictionSchema = new Schema<IPrediction>(
     },
     prediction: {
       type: String,
-      enum: ['toxic', 'non-toxic', 'pending', 'error'],
       default: 'pending',
     },
     probability: {
@@ -64,18 +123,34 @@ const PredictionSchema = new Schema<IPrediction>(
       max: 1,
       default: null,
     },
+    threshold: {
+      type: Number,
+      default: 0.75,
+    },
+    endpoint: {
+      type: String,
+      default: 'Tox21 SR-p53',
+    },
+    inferenceTimeMs: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
     importantAtoms: {
-      type: [Number],
+      type: [ImportantAtomSchema],
       default: [],
     },
     importantBonds: {
       type: [ImportantBondSchema],
       default: [],
     },
-    executionTime: {
-      type: Number,
-      min: 0,
-      default: null,
+    molecularGraph: {
+      type: MolecularGraphSchema,
+      default: () => ({ atoms: [], bonds: [] }),
+    },
+    explanationImage: {
+      type: String,
+      default: '/outputs/explanations/molecule_explanation.png',
     },
   },
   {

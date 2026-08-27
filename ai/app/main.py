@@ -50,6 +50,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+outputs_path = BASE_DIR / "EQ-KA-GCN" / "outputs"
+outputs_path.mkdir(parents=True, exist_ok=True)
+
+app.mount("/outputs", StaticFiles(directory=str(outputs_path)), name="outputs")
+
 # ─── Routers ──────────────────────────────────────────────
 app.include_router(predict.router, prefix="/api", tags=["Prediction"])
 app.include_router(explain.router, prefix="/api", tags=["Explainability"])

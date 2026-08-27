@@ -45,8 +45,11 @@ export const usePredictions = () => {
     async (smiles: string) => {
       setPredicting(true);
       setError(null);
+      const startTime = performance.now();
       try {
         const prediction = await predictionService.createPrediction(smiles);
+        const totalTime = Math.round(performance.now() - startTime);
+        prediction.totalResponseTimeMs = totalTime;
         addPrediction(prediction);
         return prediction;
       } catch (err) {

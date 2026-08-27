@@ -17,30 +17,30 @@ logger = logging.getLogger("EQ-KA-GCN.explainability.explainer")
 
 class GNNExplainerModule:
     """
-    Wrapper for GNNExplainer to extract node feature masks and edge importance masks
-    for individual molecular graph toxicity predictions.
+    GNNExplainer module for extracting node feature masks and edge importance masks
+    for individual molecular graph toxicity predictions on trained KA-GCN models.
     """
 
     def __init__(
         self,
-        epochs: int = 100,
+        epochs: int = 40,
         lr: float = 0.01,
-        feat_mask_type: str = "feature",
-        num_hops: int = 2,
+        threshold: float = 0.75,
+        seed: int = 42,
     ) -> None:
         """
-        Initializes the GNNExplainerModule.
+        Initializes GNNExplainerModule.
 
         Args:
-            epochs (int): Number of optimization iterations.
-            lr (float): Learning rate for mask optimization.
-            feat_mask_type (str): Type of node feature mask.
-            num_hops (int): Computation graph hop distance.
+            epochs (int): Number of mask optimization epochs.
+            lr (float): Learning rate for mask optimizer.
+            threshold (float): Optimized decision threshold for toxicity classification (default 0.75).
+            seed (int): Random seed for reproducible mask initialization.
         """
         self.epochs = epochs
         self.lr = lr
-        self.feat_mask_type = feat_mask_type
-        self.num_hops = num_hops
+        self.threshold = threshold
+        self.seed = seed
 
     def explain_graph(
         self,
@@ -49,56 +49,70 @@ class GNNExplainerModule:
         device: torch.device,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Runs GNNExplainer optimization on a molecular graph to extract node and edge importance masks.
+        Runs GNNExplainer optimization on a molecular graph using edge_weight tensor.
 
         Args:
-            model (nn.Module): Trained GCN / KA-GCN model.
+            model (nn.Module): Trained GCN / KA-GCN model instance.
             graph (Data): PyTorch Geometric Data graph instance.
-            device (torch.device): Computing device.
+            device (torch.device): Computing device (cpu or cuda).
 
         Returns:
             Tuple[np.ndarray, np.ndarray]:
                 - Node importance scores array of shape [num_nodes].
                 - Edge importance scores array of shape [num_edges].
         """
-        logger.info(f"Running GNNExplainer on molecular graph with {graph.num_nodes} nodes and {graph.num_edges} edges...")
+        logger.info(
+            f"Running GNNExplainer on molecular graph ({graph.num_nodes} nodes, {graph.num_edges} edges, threshold {self.threshold}, seed {self.seed})..."
+        )
+
+        # 1. Freeze Model Parameters & Set Evaluation Mode
         model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
 
-        x = graph.x.to(device).float()
-        edge_index = graph.edge_index.to(device)
-        batch = torch.zeros(x.size(0), dtype=torch.long, device=device)
+        # Set controlled seeds for reproducible mask initialization
+        torch.manual_seed(self.seed)
+        np.random.seed(self.seed)
 
-        # 1. Forward pass to get target class prediction logit
+        if graph is None or graph.x is None or graph.edge_index is None:
+            raise ValueError("Invalid PyG Data object passed to explain_graph: 'x' and 'edge_index' tensors must be non-None.")
+
+        x: torch.Tensor = graph.x.to(device).float()
+        edge_index: torch.Tensor = graph.edge_index.to(device)
+        batch: torch.Tensor = torch.zeros(x.size(0), dtype=torch.long, device=device)
+
+        # 2. Get Original Model Prediction with Configured Threshold (0.75)
         with torch.no_grad():
-            orig_logits = model(x=x, edge_index=edge_index, batch=batch, return_logits=True)
-            orig_prob = torch.sigmoid(orig_logits).item()
-            target_class = 1 if orig_prob >= 0.5 else 0
+            try:
+                orig_logits = model(x=x, edge_index=edge_index, batch=batch, return_logits=True)
+            except Exception as e:
+                logger.error(f"Failed forward pass during GNNExplainer initialization: {e}")
+                raise RuntimeError(f"Model forward pass failed: {e}") from e
+
+            orig_prob = torch.sigmoid(orig_logits).squeeze().item()
+            target_class = 1 if orig_prob >= self.threshold else 0
 
         num_nodes, num_features = x.size()
         num_edges = edge_index.size(1)
 
-        # 2. Initialize learnable mask parameters
+        # 3. Initialize Learnable Mask Parameters
         edge_mask_param = nn.Parameter(torch.randn(num_edges, device=device) * 0.1)
         node_mask_param = nn.Parameter(torch.randn(num_nodes, num_features, device=device) * 0.1)
 
         optimizer = torch.optim.Adam([edge_mask_param, node_mask_param], lr=self.lr)
 
-        # Loss weights
         size_weight = 0.005
-        entropy_weight = 1.0
+        entropy_weight = 0.1
 
         for epoch in range(self.epochs):
             optimizer.zero_grad()
 
-            # Sigmoid activation maps parameters to [0, 1] masks
             edge_mask = torch.sigmoid(edge_mask_param)
             node_mask = torch.sigmoid(node_mask_param)
 
-            # Apply node mask to input features
             x_masked = x * node_mask
 
-            # Forward pass with masked features and edge weights
-            # Pass edge_mask as edge weights if model supports or via edge_index weighting
+            # Pass edge_mask as edge_weight into model forward pass (NO TypeError fallback)
             try:
                 masked_logits = model(
                     x=x_masked,
@@ -107,56 +121,50 @@ class GNNExplainerModule:
                     return_logits=True,
                     edge_weight=edge_mask,
                 )
-            except TypeError:
-                # If model forward does not take edge_weight directly, pass x_masked
-                masked_logits = model(
-                    x=x_masked,
-                    edge_index=edge_index,
-                    batch=batch,
-                    return_logits=True,
-                )
+            except TypeError as te:
+                logger.error(f"Model forward pass does not support edge_weight parameter: {te}")
+                raise ValueError("Model does not support edge_weight parameter in forward pass.") from te
 
-            masked_prob = torch.sigmoid(masked_logits)
+            masked_prob = torch.sigmoid(masked_logits).squeeze()
 
-            # Target prediction loss (cross-entropy or log-loss with target class)
+            # Target prediction log-loss objective
             if target_class == 1:
-                pred_loss = -torch.log(masked_prob + 1e-8)
+                pred_loss = -torch.log(masked_prob.clamp(1e-7, 1.0 - 1e-7))
             else:
-                pred_loss = -torch.log(1.0 - masked_prob + 1e-8)
+                pred_loss = -torch.log((1.0 - masked_prob).clamp(1e-7, 1.0 - 1e-7))
 
-            # Regularization losses
+            # Sparsity Regularization
             edge_size_loss = torch.sum(edge_mask)
             node_size_loss = torch.sum(node_mask)
 
-            edge_entropy_loss = -torch.sum(
-                edge_mask * torch.log(edge_mask + 1e-8)
-                + (1 - edge_mask) * torch.log(1 - edge_mask + 1e-8)
+            # Entropy Regularization
+            edge_entropy = -torch.sum(
+                edge_mask * torch.log(edge_mask + 1e-7) + (1.0 - edge_mask) * torch.log(1.0 - edge_mask + 1e-7)
+            )
+            node_entropy = -torch.sum(
+                node_mask * torch.log(node_mask + 1e-7) + (1.0 - node_mask) * torch.log(1.0 - node_mask + 1e-7)
             )
 
-            total_loss = (
-                pred_loss.squeeze()
-                + size_weight * (edge_size_loss + node_size_loss)
-                + entropy_weight * edge_entropy_loss
-            )
+            total_loss = pred_loss + size_weight * (edge_size_loss + node_size_loss) + entropy_weight * (edge_entropy + node_entropy)
 
             total_loss.backward()
             optimizer.step()
 
-        # 3. Final Importance Scores Extraction
+        # 4. Extract Final Importance Scores
         with torch.no_grad():
             final_edge_mask = torch.sigmoid(edge_mask_param).cpu().numpy()
             final_node_mask = torch.sigmoid(node_mask_param).mean(dim=-1).cpu().numpy()
 
-        # Normalize importance scores to range [0, 1]
-        node_max = np.max(final_node_mask) if np.max(final_node_mask) > 0 else 1.0
-        edge_max = np.max(final_edge_mask) if np.max(final_edge_mask) > 0 else 1.0
+        # Relative Normalization
+        node_max = float(np.max(final_node_mask)) if np.max(final_node_mask) > 0 else 1.0
+        edge_max = float(np.max(final_edge_mask)) if np.max(final_edge_mask) > 0 else 1.0
 
         node_importance = (final_node_mask / node_max).clip(0.0, 1.0)
         edge_importance = (final_edge_mask / edge_max).clip(0.0, 1.0)
 
         logger.info(
-            f"GNNExplainer complete. Node importance range: [{node_importance.min():.3f}, {node_importance.max():.3f}] | "
-            f"Edge importance range: [{edge_importance.min():.3f}, {edge_importance.max():.3f}]"
+            f"GNNExplainer complete. Node relative importance range: [{node_importance.min():.4f}, {node_importance.max():.4f}] | "
+            f"Edge relative importance range: [{edge_importance.min():.4f}, {edge_importance.max():.4f}]"
         )
 
         return node_importance, edge_importance

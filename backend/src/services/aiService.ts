@@ -41,8 +41,36 @@ export const predictToxicity = async (
 ): Promise<AIPredictResponse> => {
   try {
     logger.info(`[AI Proxy] Requesting prediction from AI service for SMILES: ${request.smiles.substring(0, 30)}`);
-    const { data } = await aiClient.post<AIPredictResponse>('/api/predict', request);
-    return data;
+    const { data } = await aiClient.post<any>('/api/predict', request);
+
+    const importantAtoms = (data.importantAtoms ?? data.important_atoms ?? []).map((a: any) => ({
+      index: typeof a === 'number' ? a : (a.index ?? a.atom_index ?? 0),
+      element: typeof a === 'number' ? 'C' : (a.element ?? a.atom_symbol ?? 'C'),
+      score: typeof a === 'number' ? 1.0 : (typeof a.score === 'number' ? a.score : (a.importance_score ?? 1.0)),
+    }));
+
+    const importantBonds = (data.importantBonds ?? data.important_bonds ?? []).map((b: any) => ({
+      source: b.source ?? b.atomA ?? b.u ?? 0,
+      target: b.target ?? b.atomB ?? b.v ?? 0,
+      score: typeof b.score === 'number' ? b.score : (b.weight ?? b.importance_score ?? 1.0),
+    }));
+
+    const molecularGraph = data.molecularGraph ?? data.molecular_graph ?? { atoms: [], bonds: [] };
+    const inferenceTimeMs = data.inferenceTimeMs ?? data.inference_time_ms ?? data.executionTime ?? data.execution_time ?? 0;
+
+    return {
+      smiles: data.smiles ?? request.smiles,
+      prediction: data.prediction,
+      probability: data.probability,
+      confidence: data.confidence,
+      threshold: data.threshold ?? 0.75,
+      endpoint: data.endpoint ?? 'Tox21 SR-p53',
+      inferenceTimeMs,
+      importantAtoms,
+      importantBonds,
+      molecularGraph,
+      explanationImage: data.explanationImage ?? data.explanation_image ?? '/outputs/explanations/molecule_explanation.png',
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI microservice unavailable';
     logger.error(`Prediction proxy failed: ${message}`);
@@ -55,8 +83,24 @@ export const explainPrediction = async (
 ): Promise<AIExplainResponse> => {
   try {
     logger.info(`[AI Proxy] Requesting explanation from AI service for SMILES: ${request.smiles.substring(0, 30)}`);
-    const { data } = await aiClient.post<AIExplainResponse>('/api/explain', request);
-    return data;
+    const { data } = await aiClient.post<any>('/api/explain', request);
+
+    const atomAttentions = (data.atomAttentions ?? data.atom_attentions ?? []).map((a: any) => ({
+      atomIndex: a.atomIndex ?? a.atom_index,
+      weight: a.weight,
+    }));
+    const bondAttentions = (data.bondAttentions ?? data.bond_attentions ?? []).map((b: any) => ({
+      bondIndex: b.bondIndex ?? b.bond_index,
+      weight: b.weight,
+      atoms: b.atoms,
+    }));
+    const saliencyMap = data.saliencyMap ?? data.saliency_map ?? [];
+
+    return {
+      atomAttentions,
+      bondAttentions,
+      saliencyMap,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI microservice unavailable';
     logger.error(`Explanation proxy failed: ${message}`);

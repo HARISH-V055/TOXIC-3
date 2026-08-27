@@ -5,6 +5,7 @@ Implements KA-GCN by replacing the standard MLP classifier of the GCN baseline
 with a Fourier-based Kolmogorov-Arnold Network (FourierKAN) classifier head.
 """
 
+from typing import Optional
 import torch
 import torch.nn as nn
 from torch_geometric.nn import GCNConv, global_mean_pool
@@ -114,6 +115,7 @@ class KAGCN(nn.Module):
         edge_index: torch.Tensor,
         batch: torch.Tensor,
         return_logits: bool = True,
+        edge_weight: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Performs forward propagation on input molecular graphs.
@@ -124,18 +126,19 @@ class KAGCN(nn.Module):
             batch (torch.Tensor): Graph batch indicators of shape [num_nodes].
             return_logits (bool): If True, returns raw linear logits (for training with BCEWithLogitsLoss).
                                  If False, returns sigmoid-activated probabilities.
+            edge_weight (torch.Optional[torch.Tensor]): Optional edge weight tensor of shape [num_edges] for GNNExplainer.
 
         Returns:
             torch.Tensor: Prediction values of shape [batch_size, output_dim].
         """
         # 1. First GCN Block
-        out = self.conv1(x, edge_index)
+        out = self.conv1(x, edge_index, edge_weight=edge_weight)
         out = self.bn1(out)
         out = self.relu1(out)
         out = self.drop(out)
 
         # 2. Second GCN Block
-        out = self.conv2(out, edge_index)
+        out = self.conv2(out, edge_index, edge_weight=edge_weight)
         out = self.bn2(out)
         out = self.relu2(out)
 

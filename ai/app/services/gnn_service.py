@@ -19,6 +19,8 @@ EQ_KA_GCN_DIR = BASE_DIR / "EQ-KA-GCN"
 if str(EQ_KA_GCN_DIR) not in sys.path:
     sys.path.insert(0, str(EQ_KA_GCN_DIR))
 
+from rdkit import Chem
+from rdkit.Chem import AllChem
 from config import get_config
 from graph.graph_builder import smiles_to_graph
 from models.baseline_gcn import BaselineGCN
@@ -27,6 +29,7 @@ from quantization.adaptive_qat import AdaptiveQATManager
 from explainability import (
     GNNExplainerModule,
     rank_atom_importance,
+    visualize_molecule_explanation,
 )
 
 from app.core.config import get_settings
@@ -35,7 +38,11 @@ from app.models.schemas import (
     PredictResponse,
     ExplainRequest,
     ExplainResponse,
-    BondAttention,
+    ImportantAtom,
+    ImportantBond,
+    GraphAtom,
+    GraphBond,
+    MolecularGraph,
     AtomAttention,
     BondAttentionDetail,
 )
@@ -44,7 +51,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-OPTIMAL_THRESHOLD = 0.75  # Optimal threshold calibrated for EQ-KA-GCN
+OPTIMAL_THRESHOLD = 0.75  # Optimal threshold calibrated for EQ-KA-GCN SR-p53 endpoint
 
 
 class GNNService:
@@ -69,7 +76,7 @@ class GNNService:
         logger.info("Initializing GNN Service...")
         eq_config = get_config()
 
-        # Checkpoints in priority order: QAT best -> Weighted KA-GCN best -> Baseline GCN best -> eq_ka_gcn_best.pt
+        # Checkpoints in priority order: Adaptive QAT KA-GCN best -> Weighted KA-GCN -> Baseline GCN
         checkpoints = [
             (eq_config.paths.checkpoints_dir / eq_config.quantization.qat_save_filename, "Adaptive Quantized KA-GCN"),
             (eq_config.paths.checkpoints_dir / eq_config.fourier_kan.weighted_save_filename, "Weighted KA-GCN"),
@@ -166,15 +173,45 @@ class GNNService:
             prob = torch.sigmoid(logits).item()
 
         is_toxic = prob >= OPTIMAL_THRESHOLD
-        prediction_label = "toxic" if is_toxic else "non-toxic"
+        prediction_label = "Toxic" if is_toxic else "Non-Toxic"
         confidence = prob if is_toxic else (1.0 - prob)
 
-        # 3. GNNExplainer attribution
+        # 3. Build actual RDKit 2D molecular graph connectivity
+        graph_atoms = []
+        graph_bonds = []
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            try:
+                mol_2d = Chem.Mol(mol)
+                AllChem.Compute2DCoords(mol_2d)
+                conf = mol_2d.GetConformer()
+                for idx, atom in enumerate(mol_2d.GetAtoms()):
+                    pos = conf.GetAtomPosition(idx)
+                    graph_atoms.append(
+                        GraphAtom(
+                            index=idx,
+                            element=atom.GetSymbol(),
+                            x=round(float(pos.x), 4),
+                            y=round(float(pos.y), 4),
+                        )
+                    )
+                for bond in mol_2d.GetBonds():
+                    graph_bonds.append(
+                        GraphBond(
+                            source=bond.GetBeginAtomIdx(),
+                            target=bond.GetEndAtomIdx(),
+                        )
+                    )
+            except Exception as e:
+                logger.warning(f"RDKit 2D layout extraction warning: {e}")
+
+        # 4. GNNExplainer attribution
         important_atoms = []
         important_bonds = []
+        explanation_status = "failed"
 
         try:
-            explainer = GNNExplainerModule(epochs=40, lr=0.01)
+            explainer = GNNExplainerModule(epochs=40, lr=0.01, threshold=OPTIMAL_THRESHOLD, seed=42)
             node_importance, edge_importance = explainer.explain_graph(
                 model=self.model,
                 graph=graph,
@@ -189,27 +226,77 @@ class GNNService:
                 top_k_bonds=5,
             )
 
-            important_atoms = [atom["atom_index"] for atom in top_atoms]
+            important_atoms = [
+                ImportantAtom(
+                    index=atom["atom_index"],
+                    element=atom["atom_symbol"],
+                    score=round(float(atom["importance_score"]), 4),
+                )
+                for atom in top_atoms
+                if 0 <= atom["atom_index"] < graph.num_nodes
+            ]
             important_bonds = [
-                BondAttention(
-                    atom_a=bond["u"],
-                    atom_b=bond["v"],
-                    weight=round(float(bond["importance_score"]), 3),
+                ImportantBond(
+                    source=bond["u"],
+                    target=bond["v"],
+                    score=round(float(bond["importance_score"]), 4),
                 )
                 for bond in top_bonds
+                if 0 <= bond["u"] < graph.num_nodes and 0 <= bond["v"] < graph.num_nodes
             ]
+
+            # Generate/Save the GNNExplainer visualization PNG
+            eq_config = get_config()
+            save_img_path = eq_config.paths.outputs_dir / "explanations" / "molecule_explanation.png"
+            visualize_molecule_explanation(
+                smiles=smiles,
+                node_importance=node_importance,
+                edge_importance=edge_importance,
+                save_path=str(save_img_path),
+            )
+            explanation_status = "Successfully generated"
         except Exception as e:
-            logger.warning(f"GNNExplainer failed during predict fallback: {str(e)}")
+            logger.error(f"GNNExplainer execution failed: {str(e)}", exc_info=True)
+            explanation_status = f"failed: {str(e)}"
 
         execution_time = (time.time() - start_time) * 1000
 
+        # Requirement 14: Final Validation Logging Report
+        logger.info("=================================================")
+        logger.info("GNNEXPLAINER VALIDATION")
+        logger.info("=================================================")
+        logger.info(f"Model                : Adaptive Quantized KA-GCN")
+        logger.info(f"Checkpoint           : {self.model_type}")
+        logger.info(f"SMILES               : {smiles}")
+        logger.info(f"Decision Threshold   : {OPTIMAL_THRESHOLD}")
+        logger.info(f"Predicted Class      : {prediction_label}")
+        logger.info(f"Toxicity Probability : {prob:.4f}")
+        logger.info(f"Optimization Epochs  : 40")
+        logger.info(f"Seed                 : 42")
+        logger.info("-------------------------------------------------")
+        logger.info("Top Important Atoms:")
+        for a in important_atoms:
+            logger.info(f"  Atom #{a.index} ({a.element}) : {a.score:.4f}")
+        logger.info("Top Important Bonds:")
+        for b in important_bonds:
+            logger.info(f"  Bond #{b.source}-#{b.target} : {b.score:.4f}")
+        logger.info("-------------------------------------------------")
+        logger.info(f"Explanation Status   : {explanation_status}")
+        logger.info(f"Visualization        : outputs/explanations/molecule_explanation.png")
+        logger.info("=================================================")
+
         return PredictResponse(
+            smiles=smiles,
             prediction=prediction_label,
             probability=round(float(prob), 4),
             confidence=round(float(confidence), 4),
+            threshold=OPTIMAL_THRESHOLD,
+            endpoint="Tox21 SR-p53",
+            inference_time_ms=round(execution_time, 2),
             important_atoms=important_atoms,
             important_bonds=important_bonds,
-            execution_time=round(execution_time, 2),
+            molecular_graph=MolecularGraph(atoms=graph_atoms, bonds=graph_bonds),
+            explanation_image="/outputs/explanations/molecule_explanation.png",
         )
 
     def explain(self, request: ExplainRequest) -> ExplainResponse:

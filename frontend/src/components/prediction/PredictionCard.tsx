@@ -17,25 +17,27 @@ export const ConfidenceBar: React.FC<ConfidenceBarProps> = ({
   color = 'primary',
   className = '',
 }) => {
-  const percentage = Math.round(value * 100);
+  const percentageVal = value * 100;
+  const displayPercentage = percentageVal < 0.01 && percentageVal > 0 ? '<0.01' : percentageVal.toFixed(2);
 
   const gradients = {
     primary: 'linear-gradient(90deg, #06b6d4, #3b82f6)',
     green: 'linear-gradient(90deg, #22c55e, #16a34a)',
     red: 'linear-gradient(90deg, #ef4444, #dc2626)',
+    blue: 'linear-gradient(90deg, #3b82f6, #6366f1)',
   };
 
   return (
     <div className={`w-full ${className}`}>
       <div className="flex items-center justify-between mb-1.5">
         {label && <span className="text-xs text-white/50">{label}</span>}
-        <span className="text-xs font-semibold text-white ml-auto">{percentage}%</span>
+        <span className="text-xs font-semibold text-white ml-auto">{displayPercentage}%</span>
       </div>
       <div className="confidence-bar-track">
         <motion.div
           className="confidence-bar-fill"
           initial={{ width: 0 }}
-          animate={{ width: `${percentage}%` }}
+          animate={{ width: `${Math.min(Math.max(percentageVal, 0.5), 100)}%` }}
           transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
           style={{ background: gradients[color] }}
         />

@@ -50,9 +50,13 @@ export const createPrediction = async (req: Request, res: Response, next: NextFu
           prediction: aiResult.prediction,
           probability: aiResult.probability,
           confidence: aiResult.confidence,
+          threshold: aiResult.threshold,
+          endpoint: aiResult.endpoint,
+          inferenceTimeMs: aiResult.inferenceTimeMs,
           importantAtoms: aiResult.importantAtoms,
           importantBonds: aiResult.importantBonds,
-          executionTime: aiResult.executionTime,
+          molecularGraph: aiResult.molecularGraph,
+          explanationImage: aiResult.explanationImage,
         },
         { new: true }
       );

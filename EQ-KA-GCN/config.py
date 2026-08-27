@@ -53,8 +53,8 @@ class TrainingConfig:
     learning_rate: float = 0.001
     weight_decay: float = 1e-4
     epochs: int = 100
-    early_stopping_patience: int = 15
-    early_stopping: int = 15
+    early_stopping_patience: int = 25  # Increased: Focal Loss needs more epochs to converge
+    early_stopping: int = 25           # Increased: Focal Loss needs more epochs to converge
     train_ratio: float = 0.8
     val_ratio: float = 0.1
     test_ratio: float = 0.1
@@ -112,9 +112,15 @@ class FourierKANConfig:
     activation: str = "silu"
     save_filename: str = "ka_gcn_best.pt"
     history_filename: str = "ka_gcn_history.csv"
-    use_weighted_loss: bool = True
+    use_weighted_loss: bool = False  # Disabled: Focal Loss supersedes class weighting
     weighted_save_filename: str = "ka_gcn_weighted_best.pt"
     weighted_history_filename: str = "ka_gcn_weighted_history.csv"
+    # Focal Loss settings (replaces class weighting for better imbalance handling)
+    use_focal_loss: bool = True
+    focal_alpha: float = 0.75   # Weight for toxic (positive) class — must be HIGH for 18:1 imbalance
+    focal_gamma: float = 2.0    # Focusing parameter (higher = focus on hard examples)
+    focal_save_filename: str = "eq_ka_gcn_focal_best.pt"
+    focal_history_filename: str = "focal_history.csv"
 
 
 @dataclass

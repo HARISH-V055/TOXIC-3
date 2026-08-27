@@ -15,12 +15,13 @@ const app: Application = express();
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:'],
+        imgSrc: ["'self'", 'data:', 'blob:', 'http:', 'https:'],
       },
     },
   })
@@ -60,6 +61,12 @@ app.get('/health', (_req, res) => {
     version: '1.0.0',
   });
 });
+
+import path from 'path';
+
+// ─── Static Outputs ────────────────────────────────────────
+const outputsPath = path.join(__dirname, '../../EQ-KA-GCN/outputs');
+app.use('/outputs', express.static(outputsPath));
 
 // ─── API Routes ───────────────────────────────────────────
 app.use('/api', routes);

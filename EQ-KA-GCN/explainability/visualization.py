@@ -28,7 +28,7 @@ def visualize_molecule_explanation(
     save_path: str = "outputs/explanations/molecule_explanation.png",
 ) -> None:
     """
-    Renders molecular structure highlighting atom importance using RDKit or Matplotlib.
+    Renders molecular structure highlighting atom and bond importance using RDKit Cairo / Matplotlib.
 
     Args:
         smiles (str): SMILES representation of the molecule.
@@ -42,33 +42,45 @@ def visualize_molecule_explanation(
     mol = Chem.MolFromSmiles(smiles)
     if mol is not None:
         try:
-            # Prepare RDKit atom highlights
             num_atoms = mol.GetNumAtoms()
-            atom_colors = {}
             highlight_atoms = []
+            atom_colors = {}
 
             for idx in range(min(num_atoms, len(node_importance))):
                 score = float(node_importance[idx])
-                if score > 0.4:
+                if score > 0.3:
                     highlight_atoms.append(idx)
-                    # Color map from yellow/orange to dark red
-                    color = (1.0, 1.0 - score * 0.7, 1.0 - score)
-                    atom_colors[idx] = color
+                    # Color gradient from gold to coral red based on attribution score
+                    r = 1.0
+                    g = max(0.2, 0.9 - score * 0.7)
+                    b = max(0.2, 0.9 - score * 0.7)
+                    atom_colors[idx] = (r, g, b)
 
-            img = Draw.MolToImage(
+            # RDKit Cairo 2D High-Definition Renderer
+            from rdkit.Chem.Draw import rdMolDraw2D
+            drawer = rdMolDraw2D.MolDraw2DCairo(800, 500)
+            options = drawer.drawOptions()
+            options.addAtomIndices = True
+            options.bondLineWidth = 3.5
+
+            rdMolDraw2D.PrepareAndDrawMolecule(
+                drawer,
                 mol,
-                size=(600, 600),
                 highlightAtoms=highlight_atoms,
-                highlightColor=(1.0, 0.4, 0.4),
+                highlightAtomColors=atom_colors,
             )
-            img.save(out_file)
-            logger.info(f"Saved RDKit molecular explanation plot to: {out_file}")
+            drawer.FinishDrawing()
+
+            with open(out_file, "wb") as f:
+                f.write(drawer.GetDrawingText())
+
+            logger.info(f"Saved Cairo molecular explanation plot to: {out_file}")
             return
         except Exception as e:
-            logger.warning(f"RDKit rendering fallback to Matplotlib graph plot: {e}")
+            logger.warning(f"RDKit Cairo rendering fallback to Matplotlib graph plot: {e}")
 
     # Matplotlib NetworkX fallback rendering
-    fig, ax = plt.subplots(figsize=(7, 6), dpi=300)
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=300)
     ax.set_title(f"Molecular Toxicity Explanation ({smiles})", fontsize=12, fontweight="bold")
     ax.axis("off")
     plt.tight_layout()

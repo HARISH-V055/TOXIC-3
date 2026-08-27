@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { MdMenu, MdNotifications, MdScience } from 'react-icons/md';
+import { MdMenu, MdScience } from 'react-icons/md';
 import { useAuthStore } from '@store/useAuthStore';
 
 interface NavbarProps {
@@ -52,16 +52,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick, pageTitle }) => {
           <MdScience className="text-sm" />
           New Prediction
         </Link>
-
-        {/* Notifications */}
-        <button
-          id="navbar-notifications-btn"
-          className="relative p-2 rounded-lg text-white/50 hover:text-white hover:bg-white/5 transition-colors"
-          aria-label="Notifications"
-        >
-          <MdNotifications className="text-xl" />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-primary-400" />
-        </button>
 
         {/* Avatar */}
         <Link

@@ -26,24 +26,40 @@ export interface AuthResponse {
 }
 
 // Prediction types
-export interface ImportantBond {
-  atomA: number;
-  atomB: number;
-  weight: number;
+export interface ImportantAtom {
+  index: number;
+  element: string;
+  score: number;
 }
 
-export type PredictionResult = 'toxic' | 'non-toxic' | 'pending' | 'error';
+export interface ImportantBond {
+  source: number;
+  target: number;
+  score: number;
+}
+
+export interface MolecularGraph {
+  atoms: { index: number; element: string; x: number; y: number }[];
+  bonds: { source: number; target: number }[];
+}
+
+export type PredictionResult = string;
 
 export interface Prediction {
   _id: string;
   user: string;
   smiles: string;
-  prediction: PredictionResult;
+  prediction: string;
   probability: number | null;
   confidence: number | null;
-  importantAtoms: number[];
+  threshold?: number;
+  endpoint?: string;
+  inferenceTimeMs?: number | null;
+  importantAtoms: ImportantAtom[];
   importantBonds: ImportantBond[];
-  executionTime: number | null;
+  molecularGraph?: MolecularGraph;
+  explanationImage?: string;
+  totalResponseTimeMs?: number;
   createdAt: string;
   updatedAt: string;
 }

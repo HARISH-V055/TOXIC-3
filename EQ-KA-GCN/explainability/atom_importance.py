@@ -106,20 +106,19 @@ def rank_atom_importance(
         rec["rank"] = rank_idx
         ranked_atoms.append(rec)
 
-    # 2. Rank Chemical Bonds
-    bond_seen = set()
-    bond_records = []
-
+    # 2. Rank Chemical Bonds (Map directed edges u->v and v->u to undirected bond scores)
+    pair_scores: Dict[Tuple[int, int], List[float]] = {}
     for edge_i in range(edge_index.size(1)):
-        u = int(edge_index[0][edge_i])
-        v = int(edge_index[1][edge_i])
+        u = int(edge_index[0][edge_i].item())
+        v = int(edge_index[1][edge_i].item())
         pair = tuple(sorted((u, v)))
+        if pair not in pair_scores:
+            pair_scores[pair] = []
+        pair_scores[pair].append(float(edge_importance[edge_i]))
 
-        if pair in bond_seen:
-            continue
-        bond_seen.add(pair)
-
-        score = float(edge_importance[edge_i])
+    bond_records = []
+    for (u, v), scores in pair_scores.items():
+        avg_score = float(np.mean(scores))
         u_atomic = int(x[u][0].item())
         v_atomic = int(x[v][0].item())
 
@@ -134,7 +133,7 @@ def rank_atom_importance(
             "u_symbol": u_sym,
             "v_symbol": v_sym,
             "bond_name": bond_label,
-            "importance_score": score,
+            "importance_score": avg_score,
         })
 
     bond_records.sort(key=lambda r: r["importance_score"], reverse=True)

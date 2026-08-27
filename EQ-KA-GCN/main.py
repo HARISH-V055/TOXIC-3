@@ -322,9 +322,45 @@ def run_pipeline() -> None:
     logger.info("Phase 5 complete. Running Phase 7 / Phase 10: Model Training.")
     logger.info("==================================================================")
 
-    # ─── PHASE 7 / PHASE 11: MODEL SELECTION & WEIGHTED TRAINING ────────────
+    # ─── PHASE 7 / PHASE 11: MODEL SELECTION & LOSS CRITERION SETUP ──────────
     if config.fourier_kan.enabled:
-        if config.fourier_kan.use_weighted_loss:
+        if config.fourier_kan.use_focal_loss:
+            # ── FOCAL LOSS TRAINING (Primary: Best for severe 18:1 imbalance) ──
+            model_name = "Focal KA-GCN"
+            best_model_path = config.paths.checkpoints_dir / config.fourier_kan.focal_save_filename
+            history_csv_path = config.paths.outputs_dir / config.fourier_kan.focal_history_filename
+            json_report_path = config.paths.outputs_dir / "focal_evaluation_report.json"
+            text_report_path = config.paths.outputs_dir / "focal_classification_report.txt"
+            prefix = "focal_"
+
+            # Compute class balance statistics for logging (not used for criterion)
+            pos_weight_ref, pos_count, neg_count = compute_positive_class_weight(train_graphs)
+
+            print("=================================================")
+            print("CLASS IMBALANCE ANALYSIS — FOCAL LOSS TRAINING")
+            print("=================================================")
+            print(f"Positive Samples (Toxic)    : {pos_count}")
+            print(f"Negative Samples (Non-Toxic): {neg_count}")
+            print(f"Imbalance Ratio             : {pos_weight_ref:.2f}:1 (Neg:Pos)")
+            print(f"Loss Function               : Focal Loss")
+            print(f"Focal Alpha (pos weight)    : {config.fourier_kan.focal_alpha}")
+            print(f"Focal Gamma (focus param)   : {config.fourier_kan.focal_gamma}")
+            print("=================================================")
+
+            logger.info(
+                f"Using Focal Loss | alpha={config.fourier_kan.focal_alpha}, "
+                f"gamma={config.fourier_kan.focal_gamma} | "
+                f"Class ratio {neg_count}:{pos_count} (Neg:Pos = {pos_weight_ref:.1f}:1)"
+            )
+
+            criterion = get_loss_criterion(
+                use_focal_loss=True,
+                focal_alpha=config.fourier_kan.focal_alpha,
+                focal_gamma=config.fourier_kan.focal_gamma,
+            )
+
+        elif config.fourier_kan.use_weighted_loss:
+            # ── WEIGHTED BCE TRAINING (Fallback) ──────────────────────────────
             model_name = "Weighted KA-GCN"
             best_model_path = config.paths.checkpoints_dir / config.fourier_kan.weighted_save_filename
             history_csv_path = config.paths.outputs_dir / config.fourier_kan.weighted_history_filename
@@ -332,11 +368,10 @@ def run_pipeline() -> None:
             text_report_path = config.paths.outputs_dir / "weighted_classification_report.txt"
             prefix = "ka_gcn_weighted_"
 
-            # Compute Class Imbalance Weight
             pos_weight, pos_count, neg_count = compute_positive_class_weight(train_graphs)
 
             print("=================================================")
-            print("CLASS IMBALANCE ANALYSIS")
+            print("CLASS IMBALANCE ANALYSIS — WEIGHTED LOSS TRAINING")
             print("=================================================")
             print(f"Positive Samples         : {pos_count}")
             print(f"Negative Samples         : {neg_count}")
@@ -344,7 +379,9 @@ def run_pipeline() -> None:
             print("=================================================")
 
             criterion = get_loss_criterion(positive_class_weight=pos_weight)
+
         else:
+            # ── STANDARD (UNWEIGHTED) BCE ─────────────────────────────────────
             model_name = "KA-GCN"
             best_model_path = config.paths.checkpoints_dir / config.fourier_kan.save_filename
             history_csv_path = config.paths.outputs_dir / config.fourier_kan.history_filename

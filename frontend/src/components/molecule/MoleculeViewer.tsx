@@ -1,48 +1,42 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { TbAtom2 } from 'react-icons/tb';
-import { ImportantBond } from '@/types';
+import { ImportantAtom, ImportantBond, MolecularGraph } from '@/types';
 
 interface MoleculeViewerProps {
   smiles: string;
-  importantAtoms?: number[];
+  molecularGraph?: MolecularGraph;
+  importantAtoms?: ImportantAtom[];
   importantBonds?: ImportantBond[];
   width?: number;
   height?: number;
   className?: string;
 }
 
-interface Atom {
+interface AtomDraw {
   x: number;
   y: number;
   symbol: string;
   index: number;
   isImportant: boolean;
+  score: number;
 }
 
-interface Bond {
+interface BondDraw {
   from: number;
   to: number;
   isImportant: boolean;
-  weight: number;
+  score: number;
 }
 
 /**
- * MoleculeViewer — Custom Canvas-based 2D molecular structure visualizer.
+ * MoleculeViewer — RDKit 2D molecular structure renderer.
  *
- * This component generates a deterministic, visually appealing 2D graph
- * representation of a molecular structure from the SMILES string.
- *
- * When the full AI model is integrated:
- * - importantAtoms will receive atom indices with high GNN attention weights
- * - importantBonds will receive bond pairs with attention weights
- * - These will be highlighted with gradient overlays
- *
- * For full cheminformatics rendering, consider integrating:
- * - SmilesDrawer (npm: smiles-drawer)
- * - RDKIT.js (WebAssembly port of RDKit)
+ * Renders exact RDKit 2D coordinates and true bond topology generated
+ * by Python RDKit / PyTorch Geometric from backend responses.
  */
 export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
   smiles,
+  molecularGraph,
   importantAtoms = [],
   importantBonds = [],
   width = 400,
@@ -51,8 +45,75 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const parseSmiles = useCallback((smiles: string): { atoms: Atom[]; bonds: Bond[] } => {
-    // Parse atom symbols from SMILES
+  const getAtomImportance = useCallback(
+    (index: number): { isImportant: boolean; score: number } => {
+      const found = importantAtoms.find((a) => a.index === index);
+      if (found) return { isImportant: true, score: found.score };
+      return { isImportant: false, score: 0 };
+    },
+    [importantAtoms]
+  );
+
+  const getBondImportance = useCallback(
+    (u: number, v: number): { isImportant: boolean; score: number } => {
+      const found = importantBonds.find(
+        (b) => (b.source === u && b.target === v) || (b.source === v && b.target === u)
+      );
+      if (found) return { isImportant: true, score: found.score };
+      return { isImportant: false, score: 0 };
+    },
+    [importantBonds]
+  );
+
+  const parseGraph = useCallback((): { atoms: AtomDraw[]; bonds: BondDraw[] } => {
+    if (molecularGraph && molecularGraph.atoms && molecularGraph.atoms.length > 0) {
+      const rawAtoms = molecularGraph.atoms;
+      const rawBonds = molecularGraph.bonds || [];
+
+      // Calculate bounds for scaling 2D coordinates
+      const xs = rawAtoms.map((a) => a.x);
+      const ys = rawAtoms.map((a) => a.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      const padding = 50;
+      const rangeX = maxX - minX || 1;
+      const rangeY = maxY - minY || 1;
+      const scaleX = (width - padding * 2) / rangeX;
+      const scaleY = (height - padding * 2) / rangeY;
+      const scale = Math.min(scaleX, scaleY, 60);
+
+      const offsetX = (width - rangeX * scale) / 2 - minX * scale;
+      const offsetY = (height - rangeY * scale) / 2 - minY * scale;
+
+      const atoms: AtomDraw[] = rawAtoms.map((a) => {
+        const imp = getAtomImportance(a.index);
+        return {
+          x: a.x * scale + offsetX,
+          y: height - (a.y * scale + offsetY), // Invert Y for canvas coordinate system
+          symbol: a.element,
+          index: a.index,
+          isImportant: imp.isImportant,
+          score: imp.score,
+        };
+      });
+
+      const bonds: BondDraw[] = rawBonds.map((b) => {
+        const imp = getBondImportance(b.source, b.target);
+        return {
+          from: b.source,
+          to: b.target,
+          isImportant: imp.isImportant,
+          score: imp.score,
+        };
+      });
+
+      return { atoms, bonds };
+    }
+
+    // Fallback: Parse SMILES string linearly (no circular wrap)
     const atomSymbols: string[] = [];
     const regex = /([A-Z][a-z]?|\[.*?\])/g;
     let match;
@@ -61,42 +122,37 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
       if (sym) atomSymbols.push(sym || 'C');
     }
 
-    // Cap atom count for visualization
-    const count = Math.min(atomSymbols.length || 6, 16);
-
-    // Place atoms in a deterministic circular/ring layout
+    const count = atomSymbols.length || 1;
     const cx = width / 2;
     const cy = height / 2;
-    const radius = Math.min(width, height) * 0.32;
+    const spacing = Math.min(width / (count + 1), 60);
+    const startX = cx - ((count - 1) * spacing) / 2;
 
-    const atoms: Atom[] = Array.from({ length: count }, (_, i) => {
-      const angle = (2 * Math.PI * i) / count - Math.PI / 2;
-      const r = count > 4 ? radius : radius * 0.7;
+    const atoms: AtomDraw[] = Array.from({ length: count }, (_, i) => {
+      const imp = getAtomImportance(i);
       return {
-        x: cx + r * Math.cos(angle),
-        y: cy + r * Math.sin(angle),
+        x: startX + i * spacing,
+        y: cy,
         symbol: atomSymbols[i] ?? 'C',
         index: i,
-        isImportant: importantAtoms.includes(i),
+        isImportant: imp.isImportant,
+        score: imp.score,
       };
     });
 
-    // Connect atoms in a ring with optional branches
-    const bonds: Bond[] = atoms.map((_atom, i) => {
-      const nextIdx = (i + 1) % count;
-      const bondPair = importantBonds.find(
-        (b) => (b.atomA === i && b.atomB === nextIdx) || (b.atomB === i && b.atomA === nextIdx)
-      );
-      return {
+    const bonds: BondDraw[] = [];
+    for (let i = 0; i < count - 1; i++) {
+      const imp = getBondImportance(i, i + 1);
+      bonds.push({
         from: i,
-        to: nextIdx,
-        isImportant: !!bondPair,
-        weight: bondPair?.weight ?? 0,
-      };
-    });
+        to: i + 1,
+        isImportant: imp.isImportant,
+        score: imp.score,
+      });
+    }
 
     return { atoms, bonds };
-  }, [smiles, importantAtoms, importantBonds, width, height]);
+  }, [molecularGraph, smiles, getAtomImportance, getBondImportance, width, height]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -108,12 +164,14 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
 
     if (!smiles) return;
 
-    const { atoms, bonds } = parseSmiles(smiles);
+    const { atoms, bonds } = parseGraph();
 
-    // Draw bonds
+    // 1. Draw true chemical bonds
     bonds.forEach((bond) => {
-      const a = atoms[bond.from];
-      const b = atoms[bond.to];
+      const a = atoms.find((item) => item.index === bond.from);
+      const b = atoms.find((item) => item.index === bond.to);
+
+      if (!a || !b) return;
 
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
@@ -121,38 +179,36 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
 
       if (bond.isImportant) {
         const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-        gradient.addColorStop(0, `rgba(6, 182, 212, ${0.4 + bond.weight * 0.5})`);
-        gradient.addColorStop(1, `rgba(59, 130, 246, ${0.4 + bond.weight * 0.5})`);
+        gradient.addColorStop(0, `rgba(6, 182, 212, ${0.5 + bond.score * 0.5})`);
+        gradient.addColorStop(1, `rgba(59, 130, 246, ${0.5 + bond.score * 0.5})`);
         ctx.strokeStyle = gradient;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 3.0;
       } else {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1.8;
       }
       ctx.stroke();
     });
 
-    // Draw atoms
+    // 2. Draw atoms with GNNExplainer importance highlights
     atoms.forEach((atom) => {
-      // Glow for important atoms
       if (atom.isImportant) {
-        const glow = ctx.createRadialGradient(atom.x, atom.y, 0, atom.x, atom.y, 18);
-        glow.addColorStop(0, 'rgba(6, 182, 212, 0.35)');
+        const glow = ctx.createRadialGradient(atom.x, atom.y, 0, atom.x, atom.y, 20);
+        glow.addColorStop(0, 'rgba(6, 182, 212, 0.45)');
         glow.addColorStop(1, 'rgba(6, 182, 212, 0)');
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(atom.x, atom.y, 18, 0, Math.PI * 2);
+        ctx.arc(atom.x, atom.y, 20, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Atom circle
       const r = atom.symbol.length > 1 ? 14 : 12;
       ctx.beginPath();
       ctx.arc(atom.x, atom.y, r, 0, Math.PI * 2);
 
       if (atom.isImportant) {
         const grad = ctx.createRadialGradient(atom.x - 3, atom.y - 3, 1, atom.x, atom.y, r);
-        grad.addColorStop(0, '#22d3ee');
+        grad.addColorStop(0, '#06b6d4');
         grad.addColorStop(1, '#2563eb');
         ctx.fillStyle = grad;
       } else {
@@ -160,18 +216,17 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
       }
 
       ctx.fill();
-      ctx.strokeStyle = atom.isImportant ? 'rgba(6, 182, 212, 0.6)' : 'rgba(255,255,255,0.1)';
+      ctx.strokeStyle = atom.isImportant ? 'rgba(6, 182, 212, 0.8)' : 'rgba(255, 255, 255, 0.2)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // Atom label
-      ctx.fillStyle = atom.isImportant ? '#ffffff' : 'rgba(255,255,255,0.7)';
-      ctx.font = `${atom.symbol.length > 1 ? '9px' : '10px'} JetBrains Mono, monospace`;
+      ctx.fillStyle = atom.isImportant ? '#ffffff' : 'rgba(255, 255, 255, 0.85)';
+      ctx.font = `bold ${atom.symbol.length > 1 ? '10px' : '11px'} JetBrains Mono, monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(atom.symbol, atom.x, atom.y);
+      ctx.fillText(`${atom.symbol}${atom.index}`, atom.x, atom.y);
     });
-  }, [parseSmiles, smiles, width, height]);
+  }, [parseGraph, smiles, width, height]);
 
   useEffect(() => {
     draw();
@@ -179,10 +234,7 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
 
   if (!smiles) {
     return (
-      <div
-        className={`molecule-viewer ${className}`}
-        style={{ width, height }}
-      >
+      <div className={`molecule-viewer ${className}`} style={{ width, height }}>
         <div className="text-center text-white/20 px-6">
           <TbAtom2 className="text-5xl mx-auto mb-3 text-primary-500/30" />
           <p className="text-sm">Enter a SMILES string to visualize the molecular structure</p>

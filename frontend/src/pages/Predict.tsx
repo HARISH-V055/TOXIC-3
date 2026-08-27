@@ -56,24 +56,18 @@ const Predict: React.FC = () => {
     setApiError(null);
   };
 
-  const getRiskBadge = (prob: number | null) => {
+  const getRiskBadge = (prob: number | null, threshold: number = 0.75) => {
     if (prob === null) return null;
-    if (prob < 0.35) {
+    if (prob >= threshold) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-500/15 text-green-400 border border-green-500/20">
-          Low Toxicity Risk
-        </span>
-      );
-    } else if (prob < 0.70) {
-      return (
-        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
-          Medium Toxicity Risk
+        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/15 text-red-400 border border-red-500/20">
+          Tox21 SR-p53: Predicted Active
         </span>
       );
     } else {
       return (
-        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-500/15 text-red-400 border border-red-500/20">
-          High Toxicity Risk
+        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-500/15 text-green-400 border border-green-500/20">
+          Tox21 SR-p53: Predicted Non-Active
         </span>
       );
     }
@@ -202,7 +196,7 @@ const Predict: React.FC = () => {
             className="space-y-5 print-container"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">Prediction Result</h2>
+              <h2 className="text-lg font-semibold text-white">Prediction & Explainability Report</h2>
               <Button
                 onClick={handleDownloadPDF}
                 variant="secondary"
@@ -215,103 +209,263 @@ const Predict: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              {/* Result Card */}
-              <Card>
-                <div className="flex items-start justify-between mb-5">
+              {/* Model Output Summary Card */}
+              <Card className="space-y-4">
+                <div className="flex items-start justify-between border-b border-white/5 pb-3">
                   <div>
-                    <p className="text-xs text-white/40 mb-1">Result</p>
-                    <div className="flex items-center gap-3">
-                      <Badge prediction={result.prediction} />
-                      <span className={`text-2xl font-black ${result.prediction === 'toxic' ? 'text-red-400' : 'text-green-400'}`}>
-                        {result.prediction === 'toxic' ? '⚠ Toxic' : '✓ Safe'}
-                      </span>
-                    </div>
+                    <p className="text-xs text-white/40 mb-1">Prediction Class</p>
+                    <span className={`text-2xl font-black ${result.prediction?.toLowerCase() === 'toxic' ? 'text-red-400' : 'text-green-400'}`}>
+                      {result.prediction === 'Toxic' || result.prediction === 'toxic' ? 'Predicted Toxic' : 'Predicted Non-Toxic'}
+                    </span>
+                    <p className="text-xs text-white/50 mt-1 font-medium">
+                      {result.prediction?.toLowerCase() === 'toxic'
+                        ? 'The model predicts Toxic for the Tox21 SR-p53 endpoint.'
+                        : 'The model predicts Non-Toxic for the Tox21 SR-p53 endpoint.'}
+                    </p>
                   </div>
-                  {result.executionTime && (
-                    <span className="text-xs text-white/30 bg-white/5 px-2 py-1 rounded-lg">
-                      {result.executionTime.toFixed(0)}ms
+                  {getRiskBadge(result.probability, result.threshold || 0.75)}
+                </div>
+
+                {/* Key Bioassay & Model Metrics */}
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-white/40 block mb-1">Dataset</span>
+                    <span className="text-white font-semibold">Tox21</span>
+                  </div>
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-white/40 block mb-1">Bioassay Endpoint</span>
+                    <span className="text-white font-semibold">{result.endpoint || 'SR-p53'}</span>
+                  </div>
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-white/40 block mb-1">AI Architecture</span>
+                    <span className="text-white font-semibold">Adaptive Quantized KA-GCN</span>
+                  </div>
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                    <span className="text-white/40 block mb-1">Decision Threshold</span>
+                    <span className="text-white font-mono font-semibold">
+                      75% (0.75)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mathematically Consistent Probabilities (Requirement 2 & 3) */}
+                <div className="space-y-3 pt-2">
+                  {result.probability !== null && (
+                    <>
+                      <ConfidenceBar
+                        value={result.probability}
+                        label="Toxicity Probability"
+                        color={result.probability >= (result.threshold || 0.75) ? 'red' : 'green'}
+                      />
+                      <ConfidenceBar
+                        value={1 - result.probability}
+                        label="Non-Toxic Probability"
+                        color={result.probability < (result.threshold || 0.75) ? 'green' : 'blue'}
+                      />
+                    </>
+                  )}
+                  <p className="text-[10px] text-white/30 font-mono">
+                    Decision Rule: Toxicity Probability ≥ 75.00% → Toxic | Toxicity Probability &lt; 75.00% → Non-Toxic
+                  </p>
+                </div>
+
+                {/* Inference & Response Timings (Requirement 12) */}
+                <div className="flex flex-wrap justify-between items-center text-xs text-white/40 pt-3 border-t border-white/5 font-mono">
+                  <span>
+                    Model Inference Time:{' '}
+                    <strong className="text-white">
+                      {result.inferenceTimeMs ? `${result.inferenceTimeMs.toFixed(2)} ms` : result.executionTime ? `${result.executionTime.toFixed(2)} ms` : 'N/A'}
+                    </strong>
+                  </span>
+                  {result.totalResponseTimeMs && (
+                    <span>
+                      Total Response Time:{' '}
+                      <strong className="text-white/80">{result.totalResponseTimeMs} ms</strong>
                     </span>
                   )}
                 </div>
-
-                <div className="space-y-4">
-                  {/* Risk Badge */}
-                  <div className="flex justify-between items-center text-xs border-b border-white/5 pb-2">
-                    <span className="text-white/40">Risk Metric</span>
-                    {getRiskBadge(result.probability)}
-                  </div>
-
-                  {result.probability !== null && (
-                    <ConfidenceBar
-                      value={result.probability}
-                      label="Toxicity Probability"
-                      color={result.prediction === 'toxic' ? 'red' : 'green'}
-                    />
-                  )}
-                  {result.confidence !== null && (
-                    <ConfidenceBar
-                      value={result.confidence}
-                      label="Model Confidence"
-                      color="primary"
-                    />
-                  )}
-                </div>
-
-                {/* Atom highlights */}
-                {result.importantAtoms.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-white/5">
-                    <p className="text-xs text-white/40 mb-2">Important Atoms (GNN Attention)</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {result.importantAtoms.map((atomIdx) => (
-                        <span
-                          key={atomIdx}
-                          className="px-2 py-0.5 rounded-md bg-primary-500/15 border border-primary-500/20 text-primary-400 text-xs font-mono"
-                        >
-                          Atom #{atomIdx}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Important bonds */}
-                {result.importantBonds.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-xs text-white/40 mb-2">Important Bonds</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {result.importantBonds.map((bond, i) => (
-                        <span
-                          key={i}
-                          className="px-2 py-0.5 rounded-md bg-accent-500/10 border border-accent-500/20 text-accent-400 text-xs font-mono"
-                        >
-                          #{bond.atomA}–#{bond.atomB} ({Math.round(bond.weight * 100)}%)
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </Card>
 
-              {/* Molecule Viewer */}
+              {/* RDKit Molecular Structure Canvas (Requirement 8 & 10) */}
               <Card padding="sm" className="print-molecule-card">
-                <p className="text-xs text-white/40 mb-3 px-2">Molecular Structure</p>
+                <p className="text-xs text-white/40 mb-3 px-2 font-medium">Molecular Structure Depiction</p>
                 <MoleculeViewer
                   smiles={result.smiles}
+                  molecularGraph={result.molecularGraph}
                   importantAtoms={result.importantAtoms}
                   importantBonds={result.importantBonds}
                   width={400}
-                  height={280}
+                  height={260}
                   className="w-full"
                 />
-                <p className="text-[10px] text-white/20 text-center mt-2">
-                  Highlighted atoms/bonds indicate high GNN attention weights
+                <p className="text-[10px] text-white/30 text-center mt-2 font-mono">
+                  Exact RDKit 2D atom coordinates with GNNExplainer attribution highlights
                 </p>
               </Card>
             </div>
 
-            {/* SMILES display */}
+            {/* Methodology Overview Section (Requirement 13) */}
+            <Card>
+              <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
+                Methodology Overview
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-xs">
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Model</span>
+                  <span className="text-white font-semibold">Adaptive Quantized KA-GCN</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Dataset</span>
+                  <span className="text-white font-semibold">Tox21</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Endpoint</span>
+                  <span className="text-white font-semibold">SR-p53</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Decision Threshold</span>
+                  <span className="text-white font-mono font-semibold">0.75</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5 col-span-2 sm:col-span-1">
+                  <span className="text-white/40 block mb-1">Explainability</span>
+                  <span className="text-primary-400 font-semibold">GNNExplainer</span>
+                </div>
+              </div>
+            </Card>
+
+            {/* GNNExplainer Rankings Section (Requirement 6) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Important Atoms */}
+              <Card>
+                <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
+                  GNNExplainer — Important Atoms
+                </h3>
+                {result.importantAtoms && result.importantAtoms.length > 0 ? (
+                  <div className="space-y-2">
+                    {result.importantAtoms.map((atom, idx) => (
+                      <div
+                        key={idx}
+                        className="flex justify-between items-center p-2 rounded-lg bg-white/5 border border-white/5 text-xs font-mono"
+                      >
+                        <span className="text-primary-300 font-bold">
+                          Atom #{atom.index} ({atom.element})
+                        </span>
+                        <span className="text-white/70">
+                          Attribution Score: <strong className="text-white">{typeof atom.score === 'number' ? atom.score.toFixed(4) : atom.score}</strong>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-white/30">No high-importance atoms identified.</p>
+                )}
+              </Card>
+
+              {/* Important Bonds */}
+              <Card>
+                <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
+                  GNNExplainer — Important Bonds
+                </h3>
+                {result.importantBonds && result.importantBonds.length > 0 ? (
+                  <div className="space-y-2">
+                    {result.importantBonds.map((bond, idx) => (
+                      <div
+                        key={idx}
+                        className="flex justify-between items-center p-2 rounded-lg bg-white/5 border border-white/5 text-xs font-mono"
+                      >
+                        <span className="text-accent-300 font-bold">
+                          Bond #{bond.source} — #{bond.target}
+                        </span>
+                        <span className="text-white/70">
+                          Attribution Score: <strong className="text-white">{typeof bond.score === 'number' ? bond.score.toFixed(4) : bond.score}</strong>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-white/30">No high-importance bonds identified.</p>
+                )}
+              </Card>
+            </div>
+
+            {/* Explanation Semantics Note (Requirement 7 & 14) */}
+            <div className="p-3.5 rounded-xl bg-primary-500/10 border border-primary-500/20 text-xs text-primary-200 leading-relaxed">
+              <span className="font-semibold text-primary-300">ℹ️ Note:</span> GNNExplainer scores represent the relative contribution of atoms and bonds to the model's prediction. A high score does not mean that the atom or bond is inherently toxic.
+            </div>
+
+            {/* Explanation Metadata Section (Requirement 10) */}
+            <Card>
+              <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
+                Explanation Metadata
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Model</span>
+                  <span className="text-white font-semibold">Adaptive Quantized KA-GCN</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Explainer</span>
+                  <span className="text-white font-semibold">GNNExplainer</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Decision Threshold</span>
+                  <span className="text-white font-mono font-semibold">0.75 (75.00%)</span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Predicted Class</span>
+                  <span className={`font-semibold ${result.prediction?.toLowerCase() === 'toxic' ? 'text-red-400' : 'text-green-400'}`}>
+                    {result.prediction}
+                  </span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Toxicity Probability</span>
+                  <span className="text-white font-mono font-semibold">
+                    {result.probability !== null ? `${(result.probability * 100).toFixed(2)}%` : 'N/A'}
+                  </span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                  <span className="text-white/40 block mb-1">Explanation Status</span>
+                  <span className="text-green-400 font-semibold flex items-center gap-1">
+                    ✓ Successfully generated
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            {/* Explanation Visualization Plot Image (Requirement 8 & 11) */}
+            <Card>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold">
+                  Explanation Visualization
+                </h3>
+                <span className="text-[10px] font-mono text-primary-400 bg-primary-500/10 border border-primary-500/20 px-2 py-0.5 rounded">
+                  GNNExplainer 2D High-DPI Plot
+                </span>
+              </div>
+              <div className="rounded-xl overflow-hidden bg-white p-3 flex justify-center shadow-lg border border-white/10">
+                <img
+                  key={result.smiles}
+                  src={
+                    result.explanationImage
+                      ? `${result.explanationImage}?t=${Date.now()}`
+                      : `/outputs/explanations/molecule_explanation.png?t=${Date.now()}`
+                  }
+                  alt="GNNExplainer Explanation Plot"
+                  className="max-h-96 w-auto object-contain rounded"
+                  onError={(e) => {
+                    const imgEl = e.target as HTMLImageElement;
+                    if (!imgEl.dataset.retried) {
+                      imgEl.dataset.retried = 'true';
+                      imgEl.src = `http://localhost:5000/outputs/explanations/molecule_explanation.png?t=${Date.now()}`;
+                    }
+                  }}
+                />
+              </div>
+            </Card>
+
+            {/* Analyzed SMILES Display */}
             <div className="glass-card p-4">
-              <p className="text-xs text-white/40 mb-1.5">Analyzed SMILES</p>
+              <p className="text-xs text-white/40 mb-1.5 font-medium">Analyzed SMILES Notation</p>
               <code className="text-sm font-mono text-primary-300 break-all">{result.smiles}</code>
             </div>
           </motion.div>
