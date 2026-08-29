@@ -3,12 +3,17 @@ Kolmogorov-Arnold Graph Convolutional Network (KA-GCN) Module for EQ-KA-GCN
 
 Implements KA-GCN by replacing the standard MLP classifier of the GCN baseline
 with a Fourier-based Kolmogorov-Arnold Network (FourierKAN) classifier head.
+
+Upgrades over Baseline:
+    - Multi-scale readout pooling (mean + max + sum concatenation)
+    - Residual skip connection from GCN layer 1 → layer 2
+    - Richer 32-dim atom features + optional edge features
 """
 
 from typing import Optional
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, global_add_pool
 
 from models.fourier_kan import FourierKANLayer
 
@@ -18,31 +23,25 @@ class KAGCN(nn.Module):
     Kolmogorov-Arnold Graph Convolutional Network (KA-GCN) for binary graph classification.
 
     Architecture:
-        Input Node Features
+        Input Node Features (32 dims)
         ↓
-        GCNConv (input_dim -> hidden_dim)
+        GCNConv (input_dim → hidden_dim)
         ↓
-        BatchNorm1d
+        BatchNorm1d + ReLU + Dropout
         ↓
-        ReLU
+        GCNConv (hidden_dim → hidden_dim)   ← residual: h2 = conv2(h1) + h1
         ↓
-        Dropout (gcn_dropout)
+        BatchNorm1d + ReLU
         ↓
-        GCNConv (hidden_dim -> hidden_dim)
+        Multi-Scale Readout: cat([global_mean_pool, global_max_pool, global_add_pool])
+        ↓                       → [batch, 3 × hidden_dim]
+        Linear projection (3×hidden_dim → hidden_dim)
         ↓
-        BatchNorm1d
+        FourierKAN Layer (hidden_dim → kan_hidden_dim)
         ↓
-        ReLU
+        Activation + Dropout
         ↓
-        Global Mean Pool (node aggregation -> [batch_size, hidden_dim])
-        ↓
-        FourierKAN Layer (hidden_dim -> kan_hidden_dim, order=fourier_order)
-        ↓
-        Activation (kan_activation: SiLU/ReLU/Tanh/GELU/Identity)
-        ↓
-        Dropout (kan_dropout)
-        ↓
-        Linear Output Layer (kan_hidden_dim -> output_dim)
+        Linear Output Layer (kan_hidden_dim → output_dim)
         ↓
         Sigmoid (optional for inference)
     """
@@ -79,10 +78,17 @@ class KAGCN(nn.Module):
         self.relu1 = nn.ReLU()
         self.drop = nn.Dropout(p=gcn_dropout)
 
-        # Second GCN Layer
+        # Second GCN Layer with residual connection
         self.conv2 = GCNConv(in_channels=hidden_dim, out_channels=hidden_dim)
         self.bn2 = nn.BatchNorm1d(num_features=hidden_dim)
         self.relu2 = nn.ReLU()
+
+        # Multi-scale pooling projection: 3×hidden_dim → hidden_dim
+        self.pool_proj = nn.Sequential(
+            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+        )
 
         # FourierKAN Layer
         self.fourier_kan = FourierKANLayer(
@@ -126,34 +132,40 @@ class KAGCN(nn.Module):
             batch (torch.Tensor): Graph batch indicators of shape [num_nodes].
             return_logits (bool): If True, returns raw linear logits (for training with BCEWithLogitsLoss).
                                  If False, returns sigmoid-activated probabilities.
-            edge_weight (torch.Optional[torch.Tensor]): Optional edge weight tensor of shape [num_edges] for GNNExplainer.
+            edge_weight (Optional[torch.Tensor]): Optional edge weight tensor of shape [num_edges] for GNNExplainer.
 
         Returns:
             torch.Tensor: Prediction values of shape [batch_size, output_dim].
         """
         # 1. First GCN Block
-        out = self.conv1(x, edge_index, edge_weight=edge_weight)
-        out = self.bn1(out)
-        out = self.relu1(out)
-        out = self.drop(out)
+        h1 = self.conv1(x, edge_index, edge_weight=edge_weight)
+        h1 = self.bn1(h1)
+        h1 = self.relu1(h1)
+        h1 = self.drop(h1)
 
-        # 2. Second GCN Block
-        out = self.conv2(out, edge_index, edge_weight=edge_weight)
-        out = self.bn2(out)
-        out = self.relu2(out)
+        # 2. Second GCN Block with residual skip connection
+        h2 = self.conv2(h1, edge_index, edge_weight=edge_weight)
+        h2 = self.bn2(h2)
+        h2 = self.relu2(h2 + h1)  # ← Residual connection
 
-        # 3. Global Mean Pooling (Node aggregation to graph level)
-        out = global_mean_pool(out, batch)
+        # 3. Multi-Scale Readout Pooling (captures mean chemistry + local hotspots + size)
+        h_mean = global_mean_pool(h2, batch)   # [B, H] average atom signature
+        h_max  = global_max_pool(h2, batch)    # [B, H] most activated atom (toxic hotspot)
+        h_sum  = global_add_pool(h2, batch)    # [B, H] size-scaled molecular fingerprint
+        out = torch.cat([h_mean, h_max, h_sum], dim=-1)  # [B, 3H]
 
-        # 4. FourierKAN Classifier Transformation
+        # 4. Project back to hidden_dim
+        out = self.pool_proj(out)  # [B, H]
+
+        # 5. FourierKAN Classifier Transformation
         out = self.fourier_kan(out)
         out = self.kan_act(out)
         out = self.kan_drop(out)
 
-        # 5. Output Projection Layer
+        # 6. Output Projection Layer
         logits = self.fc_out(out)
 
-        # 6. Output activation logic
+        # 7. Output activation logic
         if return_logits:
             return logits
 

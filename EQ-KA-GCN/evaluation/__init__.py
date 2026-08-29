@@ -4,6 +4,13 @@ Tracks validation runs, computes performance metrics (ROC-AUC, Precision, Recall
 handles plot generation, and writes test summaries to disk.
 """
 
+from evaluation.calibration import (
+    PlattScaler,
+    TemperatureScaler,
+    compute_calibration_metrics,
+    export_calibration_report,
+    plot_calibration_curves,
+)
 from evaluation.evaluator import Evaluator
 from evaluation.plots import (
     plot_accuracy_curve,
@@ -18,6 +25,11 @@ from evaluation.threshold_optimizer import ThresholdOptimizer
 __all__ = [
     "Evaluator",
     "ThresholdOptimizer",
+    "TemperatureScaler",
+    "PlattScaler",
+    "compute_calibration_metrics",
+    "plot_calibration_curves",
+    "export_calibration_report",
     "plot_loss_curve",
     "plot_accuracy_curve",
     "plot_roc_curve",

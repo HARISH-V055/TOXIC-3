@@ -36,7 +36,8 @@ class ModelConfig:
     """Hyperparameters for the baseline GCN model."""
     name: str = "BaselineGCN"
     save_filename: str = "eq_ka_gcn_best.pt"
-    input_dim: int = 5  # 5 node features (atomic number, degree, formal charge, aromaticity, hydrogens)
+    input_dim: int = 32   # 32 node features (one-hot symbol, hybridization, degree + scalar properties)
+    edge_attr_dim: int = 6  # 6 bond features (bond type one-hot, conjugation, ring membership)
     hidden_dim: int = 128
     output_dim: int = 1  # Binary prediction (toxic/non-toxic)
     dropout: float = 0.3

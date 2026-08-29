@@ -3,6 +3,11 @@ Graph Builder Module for EQ-KA-GCN
 
 Parses molecular SMILES representations using RDKit and constructs
 undirected graph objects compatible with PyTorch Geometric.
+
+Upgrade: Now includes 6-dimensional edge (bond) features:
+    - Bond type one-hot (Single, Double, Triple, Aromatic)
+    - Conjugation flag
+    - Ring membership flag
 """
 
 import logging
@@ -17,9 +22,44 @@ from graph.feature_extractor import extract_node_features
 logger = logging.getLogger("EQ-KA-GCN.graph.graph_builder")
 
 
+# Bond type vocabulary
+BOND_TYPES = [
+    Chem.rdchem.BondType.SINGLE,
+    Chem.rdchem.BondType.DOUBLE,
+    Chem.rdchem.BondType.TRIPLE,
+    Chem.rdchem.BondType.AROMATIC,
+]
+
+
+def get_bond_features(bond: Chem.Bond) -> list:
+    """
+    Extracts 6-dimensional features from a single RDKit bond.
+
+    Features:
+        Bond type one-hot : 4 dims (SINGLE, DOUBLE, TRIPLE, AROMATIC)
+        Is Conjugated     : 1 dim
+        Is In Ring        : 1 dim
+
+    Args:
+        bond (Chem.Bond): RDKit bond object.
+
+    Returns:
+        list: 6-dimensional bond feature list.
+    """
+    bt = bond.GetBondType()
+    return [
+        1.0 if bt == BOND_TYPES[0] else 0.0,   # SINGLE
+        1.0 if bt == BOND_TYPES[1] else 0.0,   # DOUBLE
+        1.0 if bt == BOND_TYPES[2] else 0.0,   # TRIPLE
+        1.0 if bt == BOND_TYPES[3] else 0.0,   # AROMATIC
+        1.0 if bond.GetIsConjugated() else 0.0, # Conjugated system
+        1.0 if bond.IsInRing() else 0.0,        # In ring
+    ]
+
+
 def smiles_to_graph(smiles: str, label: int) -> Optional[Data]:
     """
-    Parses a SMILES string, extracts node features and bond connectivity,
+    Parses a SMILES string, extracts node features, bond features, and connectivity,
     and returns a PyTorch Geometric Data object representing the molecule.
 
     Args:
@@ -28,8 +68,9 @@ def smiles_to_graph(smiles: str, label: int) -> Optional[Data]:
 
     Returns:
         Optional[Data]: PyTorch Geometric Data object with attributes:
-                        - x: Node feature tensor [num_atoms, 5]
+                        - x: Node feature tensor [num_atoms, 32]
                         - edge_index: Graph connectivity tensor [2, 2 * num_bonds]
+                        - edge_attr: Bond feature tensor [2 * num_bonds, 6]
                         - y: Label tensor [1]
                         Returns None if the SMILES string is invalid or cannot be parsed.
     """
@@ -45,28 +86,36 @@ def smiles_to_graph(smiles: str, label: int) -> Optional[Data]:
         logger.warning(f"Invalid SMILES string: '{smiles}'. RDKit failed to parse.")
         return None
 
-    # 3. Extract node features
+    # 3. Extract node (atom) features [N, 32]
     x = extract_node_features(mol)
 
-    # 4. Extract undirected edge indices (bond connectivity)
+    # 4. Extract undirected edge indices and bond features
     edge_list = []
+    edge_feat_list = []
+
     for bond in mol.GetBonds():
         u = bond.GetBeginAtomIdx()
         v = bond.GetEndAtomIdx()
-        # Add both directions to represent undirected connectivity
+        bond_feats = get_bond_features(bond)
+
+        # Add both directions (undirected graph)
         edge_list.append((u, v))
         edge_list.append((v, u))
+        edge_feat_list.append(bond_feats)
+        edge_feat_list.append(bond_feats)
 
     if edge_list:
         edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(edge_feat_list, dtype=torch.float)
     else:
-        # Handle molecules with zero bonds (e.g. single-atom compounds like Methane with implicit H's only)
+        # Handle molecules with zero bonds (single-atom compounds)
         edge_index = torch.empty((2, 0), dtype=torch.long)
+        edge_attr = torch.empty((0, 6), dtype=torch.float)
 
     # 5. Construct label tensor
     y = torch.tensor([label], dtype=torch.long)
 
-    # 6. Create PyTorch Geometric Data object
-    data = Data(x=x, edge_index=edge_index, y=y)
-    
+    # 6. Create PyTorch Geometric Data object with edge features
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
+
     return data
