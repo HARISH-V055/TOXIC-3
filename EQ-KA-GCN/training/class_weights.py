@@ -29,11 +29,23 @@ def compute_positive_class_weight(train_graphs: List[Data]) -> Tuple[float, int,
 
     for graph in train_graphs:
         if graph.y is not None:
-            val = graph.y.item() if isinstance(graph.y, torch.Tensor) else graph.y
-            if val == 1:
-                pos_count += 1
-            elif val == 0:
-                neg_count += 1
+            if isinstance(graph.y, torch.Tensor):
+                if graph.y.numel() == 1:
+                    val = graph.y.item()
+                    if val == 1:
+                        pos_count += 1
+                    elif val == 0:
+                        neg_count += 1
+                else:
+                    # Multi-task tensor: count total positives and negatives across all tasks
+                    pos_count += int((graph.y == 1).sum().item())
+                    neg_count += int((graph.y == 0).sum().item())
+            else:
+                val = graph.y
+                if val == 1:
+                    pos_count += 1
+                elif val == 0:
+                    neg_count += 1
 
     if pos_count == 0:
         logger.warning("No positive samples found in training set. Defaulting pos_weight to 1.0.")
@@ -41,8 +53,8 @@ def compute_positive_class_weight(train_graphs: List[Data]) -> Tuple[float, int,
 
     pos_weight = float(neg_count) / float(pos_count)
     logger.info(
-        f"Class balance analysis | Positive: {pos_count} | Negative: {neg_count} | "
-        f"Computed pos_weight: {pos_weight:.4f}"
+        f"Class balance analysis | Positive labels: {pos_count} | Negative labels: {neg_count} | "
+        f"Computed pos_weight ratio: {pos_weight:.4f}"
     )
 
     return pos_weight, pos_count, neg_count

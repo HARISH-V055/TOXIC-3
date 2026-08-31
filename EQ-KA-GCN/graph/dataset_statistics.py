@@ -70,12 +70,18 @@ def compute_and_log_dataset_statistics(
     min_edges = int(np.min(edge_counts))
 
     # Calculate label splits
-    labels = np.array([g.y.item() for g in dataset.graphs])
-    pos_count = int(np.sum(labels == 1))
-    neg_count = int(np.sum(labels == 0))
-
-    pos_pct = round((pos_count / valid_count) * 100, 2)
-    neg_pct = round((neg_count / valid_count) * 100, 2)
+    if dataset.graphs and dataset.graphs[0].y is not None and dataset.graphs[0].y.numel() > 1:
+        num_tasks = dataset.graphs[0].y.numel()
+        pos_count = sum(int((g.y == 1).sum().item()) for g in dataset.graphs if g.y is not None)
+        neg_count = sum(int((g.y == 0).sum().item()) for g in dataset.graphs if g.y is not None)
+        pos_pct = round((pos_count / max(1, pos_count + neg_count)) * 100, 2)
+        neg_pct = round((neg_count / max(1, pos_count + neg_count)) * 100, 2)
+    else:
+        labels = np.array([g.y.item() for g in dataset.graphs if g.y is not None])
+        pos_count = int(np.sum(labels == 1))
+        neg_count = int(np.sum(labels == 0))
+        pos_pct = round((pos_count / valid_count) * 100, 2)
+        neg_pct = round((neg_count / valid_count) * 100, 2)
 
     # Log statistics
     logger.info("==================================================================")
@@ -89,8 +95,8 @@ def compute_and_log_dataset_statistics(
     logger.info(f"Average Graph Size (Nodes + Edges):    {avg_graph_size}")
     logger.info(f"Max Graph Size (Nodes: {max_nodes}, Edges: {max_edges})")
     logger.info(f"Min Graph Size (Nodes: {min_nodes}, Edges: {min_edges})")
-    logger.info(f"Positive (Toxic) Samples:              {pos_count} ({pos_pct}%)")
-    logger.info(f"Negative (Non-Toxic) Samples:          {neg_count} ({neg_pct}%)")
+    logger.info(f"Positive (Toxic) Assay Hits:           {pos_count} ({pos_pct}%)")
+    logger.info(f"Negative (Non-Toxic) Assay Tests:      {neg_count} ({neg_pct}%)")
     logger.info("==================================================================")
 
     # Return dictionary structured for dataset_info.json

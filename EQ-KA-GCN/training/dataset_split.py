@@ -49,8 +49,16 @@ def split_graph_dataset(
         logger.error(err_msg)
         raise ValueError(err_msg)
 
-    # 1. Extract labels for stratification
-    labels = [int(g.y.item()) for g in graphs]
+    # 1. Extract labels for stratification (handles scalar or multi-task vector)
+    labels = []
+    for g in graphs:
+        if g.y is None:
+            labels.append(0)
+        elif g.y.numel() == 1:
+            labels.append(int(g.y.item()))
+        else:
+            # For multi-label, stratify by whether compound is active on any assay / primary target
+            labels.append(int(g.y[-1].item() if g.y.numel() >= 12 else (g.y.sum().item() > 0)))
 
     # 2. First Split: Train vs Temp (Val + Test)
     temp_ratio = val_ratio + test_ratio

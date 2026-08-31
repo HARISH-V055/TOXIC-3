@@ -18,7 +18,7 @@ def generate_json_report(
     metrics: Dict[str, Any],
     save_path: str,
     model_name: str = "BaselineGCN",
-    dataset_name: str = "Tox21",
+    dataset_name: str = "Tox21 (12 Endpoints)",
 ) -> None:
     """
     Creates and saves evaluation_report.json containing all calculated
@@ -36,28 +36,34 @@ def generate_json_report(
             "model_name": model_name,
             "dataset_name": dataset_name,
             "evaluation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "accuracy": metrics["accuracy"],
-            "balanced_accuracy": metrics["balanced_accuracy"],
-            "precision": metrics["precision"],
-            "recall": metrics["recall"],
-            "f1_score": metrics["f1_score"],
-            "roc_auc": metrics["roc_auc"],
-            "mcc": metrics["mcc"],
-            "confusion_matrix": metrics["confusion_matrix"],
-            "inference_time_per_sample_ms": metrics["inference_time_per_sample_ms"],
-            "classification_report_dict": metrics["classification_report_dict"],
+            "accuracy": metrics.get("accuracy", 0.0),
+            "balanced_accuracy": metrics.get("balanced_accuracy", 0.0),
+            "precision": metrics.get("precision", 0.0),
+            "recall": metrics.get("recall", 0.0),
+            "f1_score": metrics.get("f1_score", 0.0),
+            "roc_auc": metrics.get("roc_auc", 0.0),
+            "macro_roc_auc": metrics.get("macro_roc_auc", metrics.get("roc_auc", 0.0)),
+            "macro_f1": metrics.get("macro_f1", metrics.get("f1_score", 0.0)),
+            "mcc": metrics.get("mcc", 0.0),
+            "inference_time_per_sample_ms": metrics.get("inference_time_per_sample_ms", 0.0),
         }
+        if "confusion_matrix" in metrics:
+            report_data["confusion_matrix"] = metrics["confusion_matrix"]
+        if "classification_report_dict" in metrics:
+            report_data["classification_report_dict"] = metrics["classification_report_dict"]
+        if "per_task_metrics" in metrics:
+            report_data["per_task_metrics"] = metrics["per_task_metrics"]
         if "optimal_threshold" in metrics:
             report_data["optimal_threshold"] = metrics["optimal_threshold"]
         if "optimized_metrics" in metrics:
             report_data["optimized_metrics"] = metrics["optimized_metrics"]
-        
+
         path = Path(save_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(path, "w", encoding="utf-8") as f:
             json.dump(report_data, f, indent=2)
-            
+
         logger.info(f"JSON evaluation report successfully written to: {save_path}")
     except Exception as e:
         logger.error(f"Failed to generate JSON report: {str(e)}")
@@ -73,18 +79,34 @@ def generate_text_report(metrics: Dict[str, Any], save_path: str) -> None:
     """
     logger.info(f"Generating text classification report at: {save_path}")
     try:
-        class_report_str = metrics.get("classification_report_str", "")
-        
         path = Path(save_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(path, "w", encoding="utf-8") as f:
-            f.write("==================================================\n")
-            f.write("BASELINE GCN CLASSIFICATION REPORT\n")
-            f.write("==================================================\n")
-            f.write(class_report_str)
-            f.write("==================================================\n")
-            
+            f.write("======================================================================\n")
+            f.write("TOX21 MULTI-TASK EVALUATION CLASSIFICATION REPORT\n")
+            f.write("======================================================================\n")
+            f.write(f"Macro ROC-AUC          : {metrics.get('macro_roc_auc', metrics.get('roc_auc', 0.0)):.4f}\n")
+            f.write(f"Macro F1 Score         : {metrics.get('macro_f1', metrics.get('f1_score', 0.0)):.4f}\n")
+            f.write(f"Macro Accuracy         : {metrics.get('macro_accuracy', metrics.get('accuracy', 0.0)):.4f}\n")
+            f.write(f"Macro Balanced Accuracy: {metrics.get('macro_balanced_accuracy', metrics.get('balanced_accuracy', 0.0)):.4f}\n")
+            f.write(f"Macro MCC              : {metrics.get('macro_mcc', metrics.get('mcc', 0.0)):.4f}\n")
+            f.write("======================================================================\n")
+
+            if "per_task_metrics" in metrics:
+                f.write("\nINDIVIDUAL PER-ENDPOINT METRICS:\n")
+                f.write(f"{'Endpoint':<16} | {'ROC-AUC':<8} | {'F1':<8} | {'Precision':<10} | {'Recall':<8} | {'Accuracy':<8}\n")
+                f.write("-" * 70 + "\n")
+                for name, tm in metrics["per_task_metrics"].items():
+                    f.write(
+                        f"{name:<16} | {tm.get('roc_auc', 0.0):<8.4f} | {tm.get('f1_score', 0.0):<8.4f} | "
+                        f"{tm.get('precision', 0.0):<10.4f} | {tm.get('recall', 0.0):<8.4f} | {tm.get('accuracy', 0.0):<8.4f}\n"
+                    )
+                f.write("======================================================================\n")
+            elif "classification_report_str" in metrics:
+                f.write(metrics["classification_report_str"])
+                f.write("\n======================================================================\n")
+
         logger.info(f"Text classification report successfully written to: {save_path}")
     except Exception as e:
         logger.error(f"Failed to generate text classification report: {str(e)}")

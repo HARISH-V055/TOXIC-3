@@ -47,6 +47,7 @@ class GNNExplainerModule:
         model: nn.Module,
         graph: Data,
         device: torch.device,
+        target_idx: int = -1,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Runs GNNExplainer optimization on a molecular graph using edge_weight tensor.
@@ -55,6 +56,7 @@ class GNNExplainerModule:
             model (nn.Module): Trained GCN / KA-GCN model instance.
             graph (Data): PyTorch Geometric Data graph instance.
             device (torch.device): Computing device (cpu or cuda).
+            target_idx (int): Endpoint index to explain if multi-task (default: -1 for SR-p53).
 
         Returns:
             Tuple[np.ndarray, np.ndarray]:
@@ -62,7 +64,7 @@ class GNNExplainerModule:
                 - Edge importance scores array of shape [num_edges].
         """
         logger.info(
-            f"Running GNNExplainer on molecular graph ({graph.num_nodes} nodes, {graph.num_edges} edges, threshold {self.threshold}, seed {self.seed})..."
+            f"Running GNNExplainer on molecular graph ({graph.num_nodes} nodes, {graph.num_edges} edges, threshold {self.threshold}, seed {self.seed}, target_idx {target_idx})..."
         )
 
         # 1. Freeze Model Parameters & Set Evaluation Mode
@@ -81,7 +83,7 @@ class GNNExplainerModule:
         edge_index: torch.Tensor = graph.edge_index.to(device)
         batch: torch.Tensor = torch.zeros(x.size(0), dtype=torch.long, device=device)
 
-        # 2. Get Original Model Prediction with Configured Threshold (0.75)
+        # 2. Get Original Model Prediction with Configured Threshold
         with torch.no_grad():
             try:
                 orig_logits = model(x=x, edge_index=edge_index, batch=batch, return_logits=True)
@@ -89,7 +91,11 @@ class GNNExplainerModule:
                 logger.error(f"Failed forward pass during GNNExplainer initialization: {e}")
                 raise RuntimeError(f"Model forward pass failed: {e}") from e
 
-            orig_prob = torch.sigmoid(orig_logits).squeeze().item()
+            if orig_logits.numel() > 1:
+                t_idx = target_idx if target_idx >= 0 else (orig_logits.shape[-1] - 1)
+                orig_prob = torch.sigmoid(orig_logits).squeeze()[t_idx].item()
+            else:
+                orig_prob = torch.sigmoid(orig_logits).squeeze().item()
             target_class = 1 if orig_prob >= self.threshold else 0
 
         num_nodes, num_features = x.size()
@@ -125,7 +131,11 @@ class GNNExplainerModule:
                 logger.error(f"Model forward pass does not support edge_weight parameter: {te}")
                 raise ValueError("Model does not support edge_weight parameter in forward pass.") from te
 
-            masked_prob = torch.sigmoid(masked_logits).squeeze()
+            if masked_logits.numel() > 1:
+                t_idx = target_idx if target_idx >= 0 else (masked_logits.shape[-1] - 1)
+                masked_prob = torch.sigmoid(masked_logits).squeeze()[t_idx]
+            else:
+                masked_prob = torch.sigmoid(masked_logits).squeeze()
 
             # Target prediction log-loss objective
             if target_class == 1:

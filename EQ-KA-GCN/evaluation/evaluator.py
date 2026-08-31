@@ -93,7 +93,7 @@ class Evaluator:
                 batch_x = batch.x.to(self.device)
                 batch_edge_index = batch.edge_index.to(self.device)
                 batch_indicator = batch.batch.to(self.device)
-                targets = batch.y.to(self.device).view(-1, 1).float()
+                targets = batch.y.to(self.device).float().reshape(batch.num_graphs, -1)
 
                 # Model forward pass (obtaining logits)
                 logits = self.model(
@@ -120,51 +120,114 @@ class Evaluator:
             f"Average latency per sample: {avg_inference_time_ms:.3f} ms"
         )
 
-        # Reshape and parse labels
-        y_true = np.concatenate(all_targets, axis=0).flatten().astype(int)
-        y_prob = np.concatenate(all_probs, axis=0).flatten()
-        y_pred = (y_prob >= threshold).astype(int)
+        # Concatenate batches
+        y_true_raw = np.concatenate(all_targets, axis=0)
+        y_prob_raw = np.concatenate(all_probs, axis=0)
 
-        # 1. Compute scikit-learn metrics
-        acc = accuracy_score(y_true, y_pred)
-        bal_acc = balanced_accuracy_score(y_true, y_pred)
-        prec = precision_score(y_true, y_pred, zero_division=0)
-        rec = recall_score(y_true, y_pred, zero_division=0)
-        f1 = f1_score(y_true, y_pred, zero_division=0)
-        mcc = matthews_corrcoef(y_true, y_pred)
-        
-        # ROC-AUC calculation (handling single-class edge cases)
-        if len(np.unique(y_true)) > 1:
-            auc = roc_auc_score(y_true, y_prob)
+        from config import TOX21_ENDPOINTS
+
+        # Single-task case
+        if y_true_raw.ndim == 1 or y_true_raw.shape[1] == 1:
+            y_true = y_true_raw.flatten().astype(int)
+            y_prob = y_prob_raw.flatten()
+            y_pred = (y_prob >= threshold).astype(int)
+
+            acc = accuracy_score(y_true, y_pred)
+            bal_acc = balanced_accuracy_score(y_true, y_pred)
+            prec = precision_score(y_true, y_pred, zero_division=0)
+            rec = recall_score(y_true, y_pred, zero_division=0)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
+            mcc = matthews_corrcoef(y_true, y_pred)
+            auc = roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else 0.5
+            cm = confusion_matrix(y_true, y_pred).tolist()
+            class_report_dict = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
+            class_report_str = classification_report(y_true, y_pred, zero_division=0)
+
+            metrics = {
+                "accuracy": float(acc),
+                "balanced_accuracy": float(bal_acc),
+                "precision": float(prec),
+                "recall": float(rec),
+                "f1_score": float(f1),
+                "roc_auc": float(auc),
+                "mcc": float(mcc),
+                "confusion_matrix": cm,
+                "classification_report_dict": class_report_dict,
+                "classification_report_str": class_report_str,
+                "inference_time_per_sample_ms": float(avg_inference_time_ms),
+            }
         else:
-            logger.warning("Only one target class present in test dataset. ROC-AUC set to 0.5.")
-            auc = 0.5
+            # Multi-task case: shape [N, num_tasks]
+            num_tasks = y_true_raw.shape[1]
+            task_names = TOX21_ENDPOINTS[:num_tasks] if len(TOX21_ENDPOINTS) >= num_tasks else [f"Task_{i}" for i in range(num_tasks)]
+            y_true = y_true_raw.astype(int)
+            y_prob = y_prob_raw
+            y_pred = (y_prob >= threshold).astype(int)
 
-        # Confusion Matrix
-        cm = confusion_matrix(y_true, y_pred).tolist()
+            per_task_metrics = {}
+            auc_list, f1_list, acc_list, bal_acc_list, prec_list, rec_list, mcc_list = [], [], [], [], [], [], []
 
-        # Classification Report (dictionary form)
-        class_report_dict = classification_report(
-            y_true, y_pred, output_dict=True, zero_division=0
-        )
-        # Classification Report (string version for text export)
-        class_report_str = classification_report(
-            y_true, y_pred, zero_division=0
-        )
+            for i, name in enumerate(task_names):
+                yt_i = y_true[:, i]
+                yp_i = y_pred[:, i]
+                ypr_i = y_prob[:, i]
 
-        metrics = {
-            "accuracy": float(acc),
-            "balanced_accuracy": bal_acc,
-            "precision": float(prec),
-            "recall": float(rec),
-            "f1_score": float(f1),
-            "roc_auc": float(auc),
-            "mcc": mcc,
-            "confusion_matrix": cm,
-            "classification_report_dict": class_report_dict,
-            "classification_report_str": class_report_str,
-            "inference_time_per_sample_ms": float(avg_inference_time_ms),
-        }
+                acc_i = float(accuracy_score(yt_i, yp_i))
+                bal_acc_i = float(balanced_accuracy_score(yt_i, yp_i))
+                prec_i = float(precision_score(yt_i, yp_i, zero_division=0))
+                rec_i = float(recall_score(yt_i, yp_i, zero_division=0))
+                f1_i = float(f1_score(yt_i, yp_i, zero_division=0))
+                mcc_i = float(matthews_corrcoef(yt_i, yp_i))
+                auc_i = float(roc_auc_score(yt_i, ypr_i)) if len(np.unique(yt_i)) > 1 else 0.5
 
-        logger.info(f"Evaluation metrics computed successfully. Accuracy: {acc:.4f} | ROC-AUC: {auc:.4f}")
+                per_task_metrics[name] = {
+                    "accuracy": acc_i,
+                    "balanced_accuracy": bal_acc_i,
+                    "precision": prec_i,
+                    "recall": rec_i,
+                    "f1_score": f1_i,
+                    "roc_auc": auc_i,
+                    "mcc": mcc_i,
+                }
+
+                acc_list.append(acc_i)
+                bal_acc_list.append(bal_acc_i)
+                prec_list.append(prec_i)
+                rec_list.append(rec_i)
+                f1_list.append(f1_i)
+                auc_list.append(auc_i)
+                mcc_list.append(mcc_i)
+
+            macro_acc = float(np.mean(acc_list))
+            macro_bal_acc = float(np.mean(bal_acc_list))
+            macro_prec = float(np.mean(prec_list))
+            macro_rec = float(np.mean(rec_list))
+            macro_f1 = float(np.mean(f1_list))
+            macro_auc = float(np.mean(auc_list))
+            macro_mcc = float(np.mean(mcc_list))
+
+            # Primary task metrics (SR-p53 is the last task)
+            primary_name = task_names[-1] if task_names else "Primary"
+            primary_m = per_task_metrics.get(primary_name, {})
+
+            metrics = {
+                "accuracy": macro_acc,
+                "balanced_accuracy": macro_bal_acc,
+                "precision": macro_prec,
+                "recall": macro_rec,
+                "f1_score": macro_f1,
+                "roc_auc": macro_auc,
+                "macro_roc_auc": macro_auc,
+                "macro_f1": macro_f1,
+                "macro_accuracy": macro_acc,
+                "macro_balanced_accuracy": macro_bal_acc,
+                "macro_mcc": macro_mcc,
+                "mcc": macro_mcc,
+                "per_task_metrics": per_task_metrics,
+                "primary_endpoint": primary_name,
+                "primary_endpoint_metrics": primary_m,
+                "inference_time_per_sample_ms": float(avg_inference_time_ms),
+            }
+
+        logger.info(f"Evaluation metrics computed successfully. Accuracy: {metrics['accuracy']:.4f} | ROC-AUC: {metrics['roc_auc']:.4f}")
         return metrics, y_true, y_pred, y_prob

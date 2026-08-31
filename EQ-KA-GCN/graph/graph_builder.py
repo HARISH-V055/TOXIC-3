@@ -57,21 +57,22 @@ def get_bond_features(bond: Chem.Bond) -> list:
     ]
 
 
-def smiles_to_graph(smiles: str, label: int) -> Optional[Data]:
+def smiles_to_graph(smiles: str, label: Optional[object] = 0) -> Optional[Data]:
     """
     Parses a SMILES string, extracts node features, bond features, and connectivity,
     and returns a PyTorch Geometric Data object representing the molecule.
 
     Args:
         smiles (str): SMILES string representation of the molecule.
-        label (int): Target classification label for toxicity.
+        label (Optional[object]): Target classification label(s). Can be a scalar (int/float),
+                                  list of floats (multi-task), or numpy array.
 
     Returns:
         Optional[Data]: PyTorch Geometric Data object with attributes:
                         - x: Node feature tensor [num_atoms, 32]
                         - edge_index: Graph connectivity tensor [2, 2 * num_bonds]
                         - edge_attr: Bond feature tensor [2 * num_bonds, 6]
-                        - y: Label tensor [1]
+                        - y: Label tensor [1] or [12]
                         Returns None if the SMILES string is invalid or cannot be parsed.
     """
     # 1. Parse SMILES
@@ -112,8 +113,17 @@ def smiles_to_graph(smiles: str, label: int) -> Optional[Data]:
         edge_index = torch.empty((2, 0), dtype=torch.long)
         edge_attr = torch.empty((0, 6), dtype=torch.float)
 
-    # 5. Construct label tensor
-    y = torch.tensor([label], dtype=torch.long)
+    # 5. Construct label tensor (supports scalar or multi-task 12-task vector)
+    if label is None:
+        y = torch.tensor([0.0], dtype=torch.float)
+    elif isinstance(label, (list, tuple)):
+        y = torch.tensor(label, dtype=torch.float)
+    elif hasattr(label, "tolist"):
+        y = torch.tensor(label.tolist(), dtype=torch.float)
+    elif isinstance(label, torch.Tensor):
+        y = label.float()
+    else:
+        y = torch.tensor([float(label)], dtype=torch.float)
 
     # 6. Create PyTorch Geometric Data object with edge features
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)

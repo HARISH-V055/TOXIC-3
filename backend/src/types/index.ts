@@ -49,13 +49,23 @@ export interface PaginationQuery {
 export interface ImportantAtom {
   index: number;
   element: string;
+  name?: string;
   score: number;
+  rank?: number;
+  influenceType?: string;
+  role?: string;
+  description?: string;
 }
 
 export interface ImportantBond {
   source: number;
   target: number;
   score: number;
+  rank?: number;
+  bondName?: string;
+  influenceType?: string;
+  role?: string;
+  description?: string;
 }
 
 export interface MolecularGraph {
@@ -67,6 +77,16 @@ export interface AIPredictRequest {
   smiles: string;
 }
 
+export interface EndpointPrediction {
+  endpoint: string;
+  name: string;
+  category: string;
+  prediction: string;
+  probability: number;
+  confidence: number;
+  threshold: number;
+}
+
 export interface AIPredictResponse {
   smiles: string;
   prediction: string;
@@ -75,8 +95,10 @@ export interface AIPredictResponse {
   threshold: number;
   endpoint: string;
   inferenceTimeMs: number;
+  endpoints?: EndpointPrediction[];
   importantAtoms: ImportantAtom[];
   importantBonds: ImportantBond[];
+  explanationSummary?: string;
   molecularGraph: MolecularGraph;
   explanationImage: string;
 }
@@ -84,6 +106,7 @@ export interface AIPredictResponse {
 export interface AIExplainRequest {
   smiles: string;
   predictionId?: string;
+  targetEndpoint?: string;
 }
 
 export interface AIExplainResponse {

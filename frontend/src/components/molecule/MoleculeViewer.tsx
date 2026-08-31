@@ -7,6 +7,7 @@ interface MoleculeViewerProps {
   molecularGraph?: MolecularGraph;
   importantAtoms?: ImportantAtom[];
   importantBonds?: ImportantBond[];
+  prediction?: string;
   width?: number;
   height?: number;
   className?: string;
@@ -19,6 +20,8 @@ interface AtomDraw {
   index: number;
   isImportant: boolean;
   score: number;
+  role?: string;
+  influenceType?: string;
 }
 
 interface BondDraw {
@@ -26,40 +29,45 @@ interface BondDraw {
   to: number;
   isImportant: boolean;
   score: number;
+  role?: string;
+  influenceType?: string;
 }
 
 /**
- * MoleculeViewer — RDKit 2D molecular structure renderer.
+ * MoleculeViewer — RDKit 2D molecular structure renderer with directional XAI highlighting.
  *
- * Renders exact RDKit 2D coordinates and true bond topology generated
- * by Python RDKit / PyTorch Geometric from backend responses.
+ * Renders exact RDKit 2D coordinates and highlights:
+ * - Toxicity Drivers (Toxicophores) in Crimson/Amber
+ * - Non-Toxicity Stabilizers in Emerald/Cyan
  */
 export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
   smiles,
   molecularGraph,
   importantAtoms = [],
   importantBonds = [],
+  prediction = 'Non-Toxic',
   width = 400,
   height = 300,
   className = '',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isToxic = prediction.toLowerCase().includes('toxic') && !prediction.toLowerCase().includes('non-toxic');
 
   const getAtomImportance = useCallback(
-    (index: number): { isImportant: boolean; score: number } => {
+    (index: number): { isImportant: boolean; score: number; role?: string; influenceType?: string } => {
       const found = importantAtoms.find((a) => a.index === index);
-      if (found) return { isImportant: true, score: found.score };
+      if (found) return { isImportant: true, score: found.score, role: found.role, influenceType: found.influenceType };
       return { isImportant: false, score: 0 };
     },
     [importantAtoms]
   );
 
   const getBondImportance = useCallback(
-    (u: number, v: number): { isImportant: boolean; score: number } => {
+    (u: number, v: number): { isImportant: boolean; score: number; role?: string; influenceType?: string } => {
       const found = importantBonds.find(
         (b) => (b.source === u && b.target === v) || (b.source === v && b.target === u)
       );
-      if (found) return { isImportant: true, score: found.score };
+      if (found) return { isImportant: true, score: found.score, role: found.role, influenceType: found.influenceType };
       return { isImportant: false, score: 0 };
     },
     [importantBonds]
@@ -97,6 +105,8 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
           index: a.index,
           isImportant: imp.isImportant,
           score: imp.score,
+          role: imp.role,
+          influenceType: imp.influenceType,
         };
       });
 
@@ -107,6 +117,8 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
           to: b.target,
           isImportant: imp.isImportant,
           score: imp.score,
+          role: imp.role,
+          influenceType: imp.influenceType,
         };
       });
 
@@ -137,6 +149,8 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
         index: i,
         isImportant: imp.isImportant,
         score: imp.score,
+        role: imp.role,
+        influenceType: imp.influenceType,
       };
     });
 
@@ -148,6 +162,8 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
         to: i + 1,
         isImportant: imp.isImportant,
         score: imp.score,
+        role: imp.role,
+        influenceType: imp.influenceType,
       });
     }
 
@@ -179,10 +195,15 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
 
       if (bond.isImportant) {
         const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-        gradient.addColorStop(0, `rgba(6, 182, 212, ${0.5 + bond.score * 0.5})`);
-        gradient.addColorStop(1, `rgba(59, 130, 246, ${0.5 + bond.score * 0.5})`);
+        if (isToxic) {
+          gradient.addColorStop(0, `rgba(239, 68, 68, ${0.6 + bond.score * 0.4})`);
+          gradient.addColorStop(1, `rgba(249, 115, 22, ${0.6 + bond.score * 0.4})`);
+        } else {
+          gradient.addColorStop(0, `rgba(16, 185, 129, ${0.6 + bond.score * 0.4})`);
+          gradient.addColorStop(1, `rgba(6, 182, 212, ${0.6 + bond.score * 0.4})`);
+        }
         ctx.strokeStyle = gradient;
-        ctx.lineWidth = 3.0;
+        ctx.lineWidth = 3.2;
       } else {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
         ctx.lineWidth = 1.8;
@@ -193,12 +214,17 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
     // 2. Draw atoms with GNNExplainer importance highlights
     atoms.forEach((atom) => {
       if (atom.isImportant) {
-        const glow = ctx.createRadialGradient(atom.x, atom.y, 0, atom.x, atom.y, 20);
-        glow.addColorStop(0, 'rgba(6, 182, 212, 0.45)');
-        glow.addColorStop(1, 'rgba(6, 182, 212, 0)');
+        const glow = ctx.createRadialGradient(atom.x, atom.y, 0, atom.x, atom.y, 22);
+        if (isToxic) {
+          glow.addColorStop(0, 'rgba(239, 68, 68, 0.55)');
+          glow.addColorStop(1, 'rgba(239, 68, 68, 0)');
+        } else {
+          glow.addColorStop(0, 'rgba(16, 185, 129, 0.55)');
+          glow.addColorStop(1, 'rgba(16, 185, 129, 0)');
+        }
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(atom.x, atom.y, 20, 0, Math.PI * 2);
+        ctx.arc(atom.x, atom.y, 22, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -208,16 +234,24 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
 
       if (atom.isImportant) {
         const grad = ctx.createRadialGradient(atom.x - 3, atom.y - 3, 1, atom.x, atom.y, r);
-        grad.addColorStop(0, '#06b6d4');
-        grad.addColorStop(1, '#2563eb');
+        if (isToxic) {
+          grad.addColorStop(0, '#f87171');
+          grad.addColorStop(1, '#dc2626');
+        } else {
+          grad.addColorStop(0, '#34d399');
+          grad.addColorStop(1, '#059669');
+        }
         ctx.fillStyle = grad;
       } else {
         ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
       }
 
       ctx.fill();
-      ctx.strokeStyle = atom.isImportant ? 'rgba(6, 182, 212, 0.8)' : 'rgba(255, 255, 255, 0.2)';
-      ctx.lineWidth = 1.5;
+      const strokeColor = atom.isImportant
+        ? (isToxic ? 'rgba(239, 68, 68, 0.9)' : 'rgba(16, 185, 129, 0.9)')
+        : 'rgba(255, 255, 255, 0.2)';
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1.6;
       ctx.stroke();
 
       ctx.fillStyle = atom.isImportant ? '#ffffff' : 'rgba(255, 255, 255, 0.85)';
@@ -226,7 +260,7 @@ export const MoleculeViewer: React.FC<MoleculeViewerProps> = ({
       ctx.textBaseline = 'middle';
       ctx.fillText(`${atom.symbol}${atom.index}`, atom.x, atom.y);
     });
-  }, [parseGraph, smiles, width, height]);
+  }, [parseGraph, smiles, isToxic, width, height]);
 
   useEffect(() => {
     draw();

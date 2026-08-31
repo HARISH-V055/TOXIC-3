@@ -7,7 +7,6 @@ import { usePredictions } from '@hooks/usePredictions';
 import { Prediction } from '@/types';
 import { Button } from '@components/ui/Button';
 import { Alert } from '@components/ui/Alert';
-import { Badge } from '@components/ui/Badge';
 import { Card } from '@components/ui/Card';
 import { MoleculeViewer } from '@components/molecule/MoleculeViewer';
 import { ConfidenceBar } from '@components/prediction/PredictionCard';
@@ -56,7 +55,7 @@ const Predict: React.FC = () => {
     setApiError(null);
   };
 
-  const getRiskBadge = (prob: number | null, threshold: number = 0.75) => {
+  const getRiskBadge = (prob: number | null, threshold: number = 0.5) => {
     if (prob === null) return null;
     if (prob >= threshold) {
       return (
@@ -76,6 +75,8 @@ const Predict: React.FC = () => {
   const handleDownloadPDF = () => {
     window.print();
   };
+
+  const effectiveThreshold = result?.threshold ?? 0.5;
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -223,7 +224,7 @@ const Predict: React.FC = () => {
                         : 'The model predicts Non-Toxic for the Tox21 SR-p53 endpoint.'}
                     </p>
                   </div>
-                  {getRiskBadge(result.probability, result.threshold || 0.75)}
+                  {getRiskBadge(result.probability, effectiveThreshold)}
                 </div>
 
                 {/* Key Bioassay & Model Metrics */}
@@ -234,7 +235,7 @@ const Predict: React.FC = () => {
                   </div>
                   <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
                     <span className="text-white/40 block mb-1">Bioassay Endpoint</span>
-                    <span className="text-white font-semibold">{result.endpoint || 'SR-p53'}</span>
+                    <span className="text-white font-semibold">{result.endpoint || 'Tox21 (12 Endpoints)'}</span>
                   </div>
                   <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
                     <span className="text-white/40 block mb-1">AI Architecture</span>
@@ -243,7 +244,7 @@ const Predict: React.FC = () => {
                   <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
                     <span className="text-white/40 block mb-1">Decision Threshold</span>
                     <span className="text-white font-mono font-semibold">
-                      75% (0.75)
+                      {(effectiveThreshold * 100).toFixed(0)}% ({effectiveThreshold.toFixed(2)})
                     </span>
                   </div>
                 </div>
@@ -255,17 +256,17 @@ const Predict: React.FC = () => {
                       <ConfidenceBar
                         value={result.probability}
                         label="Toxicity Probability"
-                        color={result.probability >= (result.threshold || 0.75) ? 'red' : 'green'}
+                        color={result.probability >= effectiveThreshold ? 'red' : 'green'}
                       />
                       <ConfidenceBar
                         value={1 - result.probability}
                         label="Non-Toxic Probability"
-                        color={result.probability < (result.threshold || 0.75) ? 'green' : 'blue'}
+                        color={result.probability < effectiveThreshold ? 'green' : 'primary'}
                       />
                     </>
                   )}
                   <p className="text-[10px] text-white/30 font-mono">
-                    Decision Rule: Toxicity Probability ≥ 75.00% → Toxic | Toxicity Probability &lt; 75.00% → Non-Toxic
+                    Decision Rule: Toxicity Probability ≥ {(effectiveThreshold * 100).toFixed(2)}% → Toxic | Toxicity Probability &lt; {(effectiveThreshold * 100).toFixed(2)}% → Non-Toxic
                   </p>
                 </div>
 
@@ -274,7 +275,7 @@ const Predict: React.FC = () => {
                   <span>
                     Model Inference Time:{' '}
                     <strong className="text-white">
-                      {result.inferenceTimeMs ? `${result.inferenceTimeMs.toFixed(2)} ms` : result.executionTime ? `${result.executionTime.toFixed(2)} ms` : 'N/A'}
+                      {result.inferenceTimeMs !== null && result.inferenceTimeMs !== undefined ? `${result.inferenceTimeMs.toFixed(2)} ms` : 'N/A'}
                     </strong>
                   </span>
                   {result.totalResponseTimeMs && (
@@ -294,6 +295,7 @@ const Predict: React.FC = () => {
                   molecularGraph={result.molecularGraph}
                   importantAtoms={result.importantAtoms}
                   importantBonds={result.importantBonds}
+                  prediction={result.prediction}
                   width={400}
                   height={260}
                   className="w-full"
@@ -304,55 +306,200 @@ const Predict: React.FC = () => {
               </Card>
             </div>
 
-            {/* Methodology Overview Section (Requirement 13) */}
-            <Card>
-              <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
-                Methodology Overview
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-xs">
-                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-white/40 block mb-1">Model</span>
-                  <span className="text-white font-semibold">Adaptive Quantized KA-GCN</span>
+            {/* 12-Endpoint Toxicological Profile Panel */}
+            {result.endpoints && result.endpoints.length > 0 && (
+              <Card>
+                <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span>🧪</span> 12-Endpoint Toxicological Profile (Tox21 Full Assay Panel)
+                    </h3>
+                    <p className="text-xs text-white/50 mt-0.5">
+                      Multi-task deep graph neural network evaluation across Nuclear Receptors and Stress Response pathways.
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-primary-500/10 text-primary-300 border border-primary-500/20">
+                    12 Active Assays
+                  </span>
                 </div>
-                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-white/40 block mb-1">Dataset</span>
-                  <span className="text-white font-semibold">Tox21</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Nuclear Receptor Pathways */}
+                  <div className="space-y-2.5">
+                    <h4 className="text-xs font-bold text-primary-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>🧬</span> Nuclear Receptor Pathways (7)
+                    </h4>
+                    <div className="space-y-2">
+                      {result.endpoints
+                        .filter((ep) => ep.category.toLowerCase().includes('nuclear'))
+                        .map((ep) => {
+                          const isActive = ep.prediction.toLowerCase().includes('active') || ep.prediction.toLowerCase().includes('toxic');
+                          return (
+                            <div
+                              key={ep.endpoint}
+                              className="p-2.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors"
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div>
+                                  <span className="text-xs font-bold text-white mr-2">{ep.endpoint}</span>
+                                  <span className="text-[11px] text-white/50">{ep.name}</span>
+                                </div>
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    isActive
+                                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  }`}
+                                >
+                                  {isActive ? 'Active (Toxic)' : 'Inactive (Non-Toxic)'}
+                                </span>
+                              </div>
+                              <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    isActive ? 'bg-gradient-to-r from-orange-500 to-red-500' : 'bg-gradient-to-r from-teal-500 to-emerald-500'
+                                  }`}
+                                  style={{ width: `${Math.max(ep.probability * 100, 2)}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between items-center mt-1 text-[10px] text-white/40 font-mono">
+                                <span>Activity Prob: {(ep.probability * 100).toFixed(2)}%</span>
+                                <span>Conf: {(ep.confidence * 100).toFixed(2)}%</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {/* Stress Response Pathways */}
+                  <div className="space-y-2.5">
+                    <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>⚡</span> Cellular Stress Response Pathways (5)
+                    </h4>
+                    <div className="space-y-2">
+                      {result.endpoints
+                        .filter((ep) => ep.category.toLowerCase().includes('stress') || !ep.category.toLowerCase().includes('nuclear'))
+                        .map((ep) => {
+                          const isActive = ep.prediction.toLowerCase().includes('active') || ep.prediction.toLowerCase().includes('toxic');
+                          return (
+                            <div
+                              key={ep.endpoint}
+                              className="p-2.5 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors"
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div>
+                                  <span className="text-xs font-bold text-white mr-2">{ep.endpoint}</span>
+                                  <span className="text-[11px] text-white/50">{ep.name}</span>
+                                </div>
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    isActive
+                                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  }`}
+                                >
+                                  {isActive ? 'Active (Toxic)' : 'Inactive (Non-Toxic)'}
+                                </span>
+                              </div>
+                              <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-500 ${
+                                    isActive ? 'bg-gradient-to-r from-orange-500 to-red-500' : 'bg-gradient-to-r from-teal-500 to-emerald-500'
+                                  }`}
+                                  style={{ width: `${Math.max(ep.probability * 100, 2)}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between items-center mt-1 text-[10px] text-white/40 font-mono">
+                                <span>Activity Prob: {(ep.probability * 100).toFixed(2)}%</span>
+                                <span>Conf: {(ep.confidence * 100).toFixed(2)}%</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-white/40 block mb-1">Endpoint</span>
-                  <span className="text-white font-semibold">SR-p53</span>
-                </div>
-                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                  <span className="text-white/40 block mb-1">Decision Threshold</span>
-                  <span className="text-white font-mono font-semibold">0.75</span>
-                </div>
-                <div className="bg-white/5 p-2.5 rounded-xl border border-white/5 col-span-2 sm:col-span-1">
-                  <span className="text-white/40 block mb-1">Explainability</span>
-                  <span className="text-primary-400 font-semibold">GNNExplainer</span>
+              </Card>
+            )}
+
+            {/* Directional Mechanistic Summary Banner */}
+            {result.explanationSummary && (
+              <div
+                className={`p-4 rounded-2xl border ${
+                  result.prediction === 'Toxic'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <span className="text-xl">
+                    {result.prediction === 'Toxic' ? '⚠️' : '🛡️'}
+                  </span>
+                  <div>
+                    <h4 className="text-xs uppercase tracking-wider font-bold mb-1">
+                      {result.prediction === 'Toxic'
+                        ? 'Toxicity Driver Mechanism (Toxicophore Analysis)'
+                        : 'Safety & Non-Toxicity Stabilizer Mechanism'}
+                    </h4>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      {result.explanationSummary}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </Card>
+            )}
 
-            {/* GNNExplainer Rankings Section (Requirement 6) */}
+            {/* GNNExplainer Directional Rankings Section */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {/* Important Atoms */}
               <Card>
-                <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
-                  GNNExplainer — Important Atoms
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs uppercase tracking-wider text-white/70 font-bold flex items-center gap-1.5">
+                    <span>{result.prediction === 'Toxic' ? '🔥' : '✨'}</span>
+                    {result.prediction === 'Toxic'
+                      ? 'High-Influence Toxicity Drivers'
+                      : 'High-Influence Safety Stabilizers'}
+                  </h3>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                    result.prediction === 'Toxic'
+                      ? 'bg-rose-500/10 text-rose-300 border-rose-500/20'
+                      : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                  }`}>
+                    {result.prediction === 'Toxic' ? 'Toxicophores' : 'Stabilizing Atoms'}
+                  </span>
+                </div>
                 {result.importantAtoms && result.importantAtoms.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {result.importantAtoms.map((atom, idx) => (
                       <div
                         key={idx}
-                        className="flex justify-between items-center p-2 rounded-lg bg-white/5 border border-white/5 text-xs font-mono"
+                        className={`p-2.5 rounded-xl border text-xs ${
+                          result.prediction === 'Toxic'
+                            ? 'bg-rose-500/5 border-rose-500/15'
+                            : 'bg-emerald-500/5 border-emerald-500/15'
+                        }`}
                       >
-                        <span className="text-primary-300 font-bold">
-                          Atom #{atom.index} ({atom.element})
-                        </span>
-                        <span className="text-white/70">
-                          Attribution Score: <strong className="text-white">{typeof atom.score === 'number' ? atom.score.toFixed(4) : atom.score}</strong>
-                        </span>
+                        <div className="flex justify-between items-center mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center font-bold text-[10px] text-white">
+                              #{atom.rank || idx + 1}
+                            </span>
+                            <span className={`font-bold font-mono ${
+                              result.prediction === 'Toxic' ? 'text-rose-300' : 'text-emerald-300'
+                            }`}>
+                              Atom #{atom.index} — {atom.name || atom.element} ({atom.element})
+                            </span>
+                          </div>
+                          <span className="text-white/70 font-mono text-[11px]">
+                            Attribution: <strong className="text-white">{typeof atom.score === 'number' ? atom.score.toFixed(4) : atom.score}</strong>
+                          </span>
+                        </div>
+                        {atom.description && (
+                          <p className="text-[11px] text-white/60 pl-6.5 leading-snug mt-1">
+                            {atom.description}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -363,22 +510,50 @@ const Predict: React.FC = () => {
 
               {/* Important Bonds */}
               <Card>
-                <h3 className="text-xs uppercase tracking-wider text-white/50 font-bold mb-3">
-                  GNNExplainer — Important Bonds
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs uppercase tracking-wider text-white/70 font-bold flex items-center gap-1.5">
+                    <span>🔗</span>
+                    {result.prediction === 'Toxic'
+                      ? 'Toxicity-Propagating Bonds'
+                      : 'Structural Safety Bonds'}
+                  </h3>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                    result.prediction === 'Toxic'
+                      ? 'bg-rose-500/10 text-rose-300 border-rose-500/20'
+                      : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                  }`}>
+                    {result.prediction === 'Toxic' ? 'Reactive Linkages' : 'Stable Scaffolding'}
+                  </span>
+                </div>
                 {result.importantBonds && result.importantBonds.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {result.importantBonds.map((bond, idx) => (
                       <div
                         key={idx}
-                        className="flex justify-between items-center p-2 rounded-lg bg-white/5 border border-white/5 text-xs font-mono"
+                        className={`p-2.5 rounded-xl border text-xs ${
+                          result.prediction === 'Toxic'
+                            ? 'bg-rose-500/5 border-rose-500/15'
+                            : 'bg-emerald-500/5 border-emerald-500/15'
+                        }`}
                       >
-                        <span className="text-accent-300 font-bold">
-                          Bond #{bond.source} — #{bond.target}
-                        </span>
-                        <span className="text-white/70">
-                          Attribution Score: <strong className="text-white">{typeof bond.score === 'number' ? bond.score.toFixed(4) : bond.score}</strong>
-                        </span>
+                        <div className="flex justify-between items-center mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center font-bold text-[10px] text-white">
+                              #{bond.rank || idx + 1}
+                            </span>
+                            <span className="text-accent-300 font-bold font-mono">
+                              {bond.bondName || `Bond #${bond.source} — #${bond.target}`}
+                            </span>
+                          </div>
+                          <span className="text-white/70 font-mono text-[11px]">
+                            Attribution: <strong className="text-white">{typeof bond.score === 'number' ? bond.score.toFixed(4) : bond.score}</strong>
+                          </span>
+                        </div>
+                        {bond.description && (
+                          <p className="text-[11px] text-white/60 pl-6.5 leading-snug mt-1">
+                            {bond.description}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -390,7 +565,7 @@ const Predict: React.FC = () => {
 
             {/* Explanation Semantics Note (Requirement 7 & 14) */}
             <div className="p-3.5 rounded-xl bg-primary-500/10 border border-primary-500/20 text-xs text-primary-200 leading-relaxed">
-              <span className="font-semibold text-primary-300">ℹ️ Note:</span> GNNExplainer scores represent the relative contribution of atoms and bonds to the model's prediction. A high score does not mean that the atom or bond is inherently toxic.
+              <span className="font-semibold text-primary-300">ℹ️ Note:</span> GNNExplainer attribution scores isolate which specific atomic centers and bonds have the highest mathematical impact on the model's prediction — driving hazard elevation when toxic or structural stabilization when non-toxic.
             </div>
 
             {/* Explanation Metadata Section (Requirement 10) */}
@@ -409,7 +584,9 @@ const Predict: React.FC = () => {
                 </div>
                 <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
                   <span className="text-white/40 block mb-1">Decision Threshold</span>
-                  <span className="text-white font-mono font-semibold">0.75 (75.00%)</span>
+                  <span className="text-white font-mono font-semibold">
+                    {effectiveThreshold.toFixed(2)} ({(effectiveThreshold * 100).toFixed(2)}%)
+                  </span>
                 </div>
                 <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
                   <span className="text-white/40 block mb-1">Predicted Class</span>

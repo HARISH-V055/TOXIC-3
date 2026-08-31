@@ -64,18 +64,32 @@ from utils import set_seed, get_device, setup_logger
 def log_split_statistics(name: str, graphs: List[Data], logger) -> None:
     """Computes and logs the toxicity class balance and size for a dataset split."""
     total = len(graphs)
-    pos = sum(1 for g in graphs if g.y is not None and (g.y.item() if isinstance(g.y, torch.Tensor) else g.y) == 1)
-    neg = sum(1 for g in graphs if g.y is not None and (g.y.item() if isinstance(g.y, torch.Tensor) else g.y) == 0)
-    pos_pct = (pos / total) * 100 if total > 0 else 0.0
-    neg_pct = (neg / total) * 100 if total > 0 else 0.0
+    if total == 0:
+        return
+    if graphs[0].y is not None and graphs[0].y.numel() > 1:
+        num_tasks = graphs[0].y.numel()
+        pos_total = sum(int((g.y == 1).sum().item()) for g in graphs if g.y is not None)
+        neg_total = sum(int((g.y == 0).sum().item()) for g in graphs if g.y is not None)
+        logger.info("==================================================================")
+        logger.info(f"SPLIT STATISTICS - {name.upper()} ({num_tasks} TOX21 ASSAY ENDPOINTS)")
+        logger.info("==================================================================")
+        logger.info(f"Number of Graphs:                {total}")
+        logger.info(f"Total Positive Assay Hits:       {pos_total}")
+        logger.info(f"Total Negative / Inactive Assays:{neg_total}")
+        logger.info("==================================================================")
+    else:
+        pos = sum(1 for g in graphs if g.y is not None and int(g.y.item() if isinstance(g.y, torch.Tensor) else g.y) == 1)
+        neg = sum(1 for g in graphs if g.y is not None and int(g.y.item() if isinstance(g.y, torch.Tensor) else g.y) == 0)
+        pos_pct = (pos / total) * 100 if total > 0 else 0.0
+        neg_pct = (neg / total) * 100 if total > 0 else 0.0
 
-    logger.info("==================================================================")
-    logger.info(f"SPLIT STATISTICS - {name.upper()}")
-    logger.info("==================================================================")
-    logger.info(f"Number of Graphs:    {total}")
-    logger.info(f"Positive Samples:    {pos} ({pos_pct:.2f}%)")
-    logger.info(f"Negative Samples:    {neg} ({neg_pct:.2f}%)")
-    logger.info("==================================================================")
+        logger.info("==================================================================")
+        logger.info(f"SPLIT STATISTICS - {name.upper()}")
+        logger.info("==================================================================")
+        logger.info(f"Number of Graphs:    {total}")
+        logger.info(f"Positive Samples:    {pos} ({pos_pct:.2f}%)")
+        logger.info(f"Negative Samples:    {neg} ({neg_pct:.2f}%)")
+        logger.info("==================================================================")
 
 
 def run_pipeline() -> None:
@@ -153,7 +167,7 @@ def run_pipeline() -> None:
         validate_dataset(
             df_raw, 
             smiles_column=config.data.smiles_column, 
-            target_column=config.data.target_column
+            target_column=config.data.target_columns
         )
     except Exception as e:
         logger.error(f"Pipeline terminated. Dataset validation failed: {str(e)}")
@@ -163,7 +177,7 @@ def run_pipeline() -> None:
     df_clean = clean_dataset(
         df_raw, 
         smiles_column=config.data.smiles_column, 
-        target_column=config.data.target_column
+        target_column=config.data.target_columns
     )
     
     # 4. Generate Statistics
@@ -198,9 +212,9 @@ def run_pipeline() -> None:
     # 1. Load one sample molecule from the cleaned dataset
     sample_row = df_clean.iloc[0]
     sample_smiles = sample_row[config.data.smiles_column]
-    sample_label = int(sample_row[config.data.target_column])
+    sample_label = [float(sample_row[c]) for c in config.data.target_columns]
 
-    logger.info(f"Loaded sample molecule SMILES: '{sample_smiles}' with label {sample_label}")
+    logger.info(f"Loaded sample molecule SMILES: '{sample_smiles}' with {len(sample_label)} endpoints")
 
     # 2. Convert it into a graph
     graph_data = smiles_to_graph(sample_smiles, sample_label)
@@ -231,12 +245,12 @@ def run_pipeline() -> None:
     graphs_pt_path = config.paths.processed_dir / config.data.graphs_filename
     info_json_path = config.paths.processed_dir / config.data.info_filename
 
-    # 1. Generate graph dataset
+    # 1. Generate graph dataset across all 12 Tox21 endpoints
     builder = DatasetBuilder()
     graphs = builder.build_dataset(
         csv_path=processed_csv_path,
         smiles_column=config.data.smiles_column,
-        target_column=config.data.target_column,
+        target_column=config.data.target_columns,
     )
 
     # 2. Save graphs.pt
@@ -542,27 +556,29 @@ def run_pipeline() -> None:
     if config.evaluation.save_plots:
         plot_roc_curve(y_true, y_prob, str(outputs_figures_dir / f"{prefix}roc_curve.png"))
         plot_precision_recall_curve(y_true, y_prob, str(outputs_figures_dir / f"{prefix}precision_recall_curve.png"))
-        plot_confusion_matrix(test_metrics["confusion_matrix"], str(outputs_figures_dir / f"{prefix}confusion_matrix.png"))
+        cm_data = test_metrics.get("confusion_matrix", None)
+        if cm_data is not None:
+            plot_confusion_matrix(cm_data, str(outputs_figures_dir / f"{prefix}confusion_matrix.png"))
         if history_csv_path.exists():
             plot_loss_curve(str(history_csv_path), str(outputs_figures_dir / f"{prefix}loss_curve.png"))
             plot_accuracy_curve(str(history_csv_path), str(outputs_figures_dir / f"{prefix}accuracy_curve.png"))
 
-    # 8. Print Requirement 8 Summary Block
+    # 8. Print Summary Block
     if config.threshold.enabled:
         print("=================================================")
-        print("THRESHOLD OPTIMIZATION COMPLETE")
+        print("THRESHOLD OPTIMIZATION COMPLETE (MULTI-TASK TOX21)")
         print("=================================================")
         print(f"Optimal Threshold   : {optimal_threshold:.2f}")
-        print(f"Accuracy            : {test_metrics['accuracy'] * 100:.2f} %")
-        print(f"Precision           : {test_metrics['precision'] * 100:.2f} %")
-        print(f"Recall              : {test_metrics['recall'] * 100:.2f} %")
-        print(f"F1 Score            : {test_metrics['f1_score'] * 100:.2f} %")
-        print(f"Balanced Accuracy   : {test_metrics['balanced_accuracy'] * 100:.2f} %")
-        print(f"MCC                 : {test_metrics['mcc']:.4f}")
-        print(f"ROC-AUC             : {test_metrics['roc_auc']:.4f}")
+        print(f"Accuracy            : {test_metrics.get('accuracy', 0.0) * 100:.2f} %")
+        print(f"Precision           : {test_metrics.get('precision', 0.0) * 100:.2f} %")
+        print(f"Recall              : {test_metrics.get('recall', 0.0) * 100:.2f} %")
+        print(f"F1 Score            : {test_metrics.get('f1_score', 0.0) * 100:.2f} %")
+        print(f"Balanced Accuracy   : {test_metrics.get('balanced_accuracy', 0.0) * 100:.2f} %")
+        print(f"MCC                 : {test_metrics.get('mcc', 0.0):.4f}")
+        print(f"ROC-AUC             : {test_metrics.get('roc_auc', 0.0):.4f}")
         print("=================================================")
 
-    # 9. Print Requirement 9 Comparison Table
+    # 9. Print Comparison Table
     baseline_report_path = config.paths.outputs_dir / "evaluation_report.json"
     baseline_prec, baseline_rec, baseline_f1 = 0.0, 0.0, 0.0
     if baseline_report_path.exists():
@@ -575,20 +591,20 @@ def run_pipeline() -> None:
         except Exception:
             pass
 
-    w_050_prec = test_metrics_050["precision"] * 100
-    w_050_rec = test_metrics_050["recall"] * 100
-    w_050_f1 = test_metrics_050["f1_score"] * 100
+    w_050_prec = test_metrics_050.get("precision", 0.0) * 100
+    w_050_rec = test_metrics_050.get("recall", 0.0) * 100
+    w_050_f1 = test_metrics_050.get("f1_score", 0.0) * 100
 
-    w_opt_prec = test_metrics["precision"] * 100
-    w_opt_rec = test_metrics["recall"] * 100
-    w_opt_f1 = test_metrics["f1_score"] * 100
+    w_opt_prec = test_metrics.get("precision", 0.0) * 100
+    w_opt_rec = test_metrics.get("recall", 0.0) * 100
+    w_opt_f1 = test_metrics.get("f1_score", 0.0) * 100
 
     print("\n-------------------------------------------------------------")
     print(f"{'Model':<22} {'Threshold':<12} {'Precision':<11} {'Recall':<9} {'F1':<8}")
     print("-------------------------------------------------------------")
     print(f"{'Baseline GCN':<22} {'0.50':<12} {baseline_prec:.2f}%      {baseline_rec:.2f}%    {baseline_f1:.2f}%")
-    print(f"{'Weighted KA-GCN (0.50)':<22} {'0.50':<12} {w_050_prec:.2f}%      {w_050_rec:.2f}%    {w_050_f1:.2f}%")
-    print(f"{'Weighted KA-GCN (Opt)':<22} {f'{optimal_threshold:.2f}':<12} {w_opt_prec:.2f}%      {w_opt_rec:.2f}%    {w_opt_f1:.2f}%")
+    print(f"{'MultiTask KA-GCN (0.50)':<22} {'0.50':<12} {w_050_prec:.2f}%      {w_050_rec:.2f}%    {w_050_f1:.2f}%")
+    print(f"{'MultiTask KA-GCN (Opt)':<22} {f'{optimal_threshold:.2f}':<12} {w_opt_prec:.2f}%      {w_opt_rec:.2f}%    {w_opt_f1:.2f}%")
     print("-------------------------------------------------------------")
 
     # ─── PHASE 13: ADAPTIVE LAYER-WISE QAT ────────────────────────────────────
@@ -689,13 +705,13 @@ def run_pipeline() -> None:
             "memory_reduction_percent": memory_reduction,
             "fp32_inference_time_ms": fp32_latency_ms,
             "quantized_inference_time_ms": qat_test_metrics["inference_time_per_sample_ms"],
-            "accuracy": qat_test_metrics["accuracy"],
-            "balanced_accuracy": qat_test_metrics["balanced_accuracy"],
-            "precision": qat_test_metrics["precision"],
-            "recall": qat_test_metrics["recall"],
-            "f1_score": qat_test_metrics["f1_score"],
-            "roc_auc": qat_test_metrics["roc_auc"],
-            "mcc": qat_test_metrics["mcc"],
+            "accuracy": qat_test_metrics.get("accuracy", 0.0),
+            "balanced_accuracy": qat_test_metrics.get("balanced_accuracy", 0.0),
+            "precision": qat_test_metrics.get("precision", 0.0),
+            "recall": qat_test_metrics.get("recall", 0.0),
+            "f1_score": qat_test_metrics.get("f1_score", 0.0),
+            "roc_auc": qat_test_metrics.get("roc_auc", 0.0),
+            "mcc": qat_test_metrics.get("mcc", 0.0),
         }
         qat_report_path = config.paths.outputs_dir / config.quantization.qat_report_filename
         qat_manager.export_quantization_report(qat_report_data, str(qat_report_path))
@@ -710,15 +726,15 @@ def run_pipeline() -> None:
         print(f"Model Size After          : {quant_size_kb:.2f} KB")
         print(f"Compression Ratio         : {compression_ratio:.2f} x")
         print(f"Memory Reduction          : {memory_reduction:.2f} %")
-        print(f"Inference Time            : {qat_test_metrics['inference_time_per_sample_ms']:.2f} ms/sample")
+        print(f"Inference Time            : {qat_test_metrics.get('inference_time_per_sample_ms', 0.0):.2f} ms/sample")
         print(f"Optimal Threshold         : {optimal_threshold:.2f}")
-        print(f"Accuracy                  : {qat_test_metrics['accuracy'] * 100:.2f} %")
-        print(f"Precision                 : {qat_test_metrics['precision'] * 100:.2f} %")
-        print(f"Recall                    : {qat_test_metrics['recall'] * 100:.2f} %")
-        print(f"F1 Score                  : {qat_test_metrics['f1_score'] * 100:.2f} %")
-        print(f"Balanced Accuracy         : {qat_test_metrics['balanced_accuracy'] * 100:.2f} %")
-        print(f"MCC                       : {qat_test_metrics['mcc']:.4f}")
-        print(f"ROC-AUC                   : {qat_test_metrics['roc_auc']:.4f}")
+        print(f"Accuracy                  : {qat_test_metrics.get('accuracy', 0.0) * 100:.2f} %")
+        print(f"Precision                 : {qat_test_metrics.get('precision', 0.0) * 100:.2f} %")
+        print(f"Recall                    : {qat_test_metrics.get('recall', 0.0) * 100:.2f} %")
+        print(f"F1 Score                  : {qat_test_metrics.get('f1_score', 0.0) * 100:.2f} %")
+        print(f"Balanced Accuracy         : {qat_test_metrics.get('balanced_accuracy', 0.0) * 100:.2f} %")
+        print(f"MCC                       : {qat_test_metrics.get('mcc', 0.0):.4f}")
+        print(f"ROC-AUC                   : {qat_test_metrics.get('roc_auc', 0.0):.4f}")
         print("=================================================")
 
     # ─── PHASE 14: EXPLAINABILITY MODULE (GNNEXPLAINER) ──────────────────────
@@ -781,7 +797,11 @@ def run_pipeline() -> None:
                 batch=sample_batch,
                 return_logits=True,
             )
-            s_prob = torch.sigmoid(s_logits).item()
+            s_probs = torch.sigmoid(s_logits).squeeze()
+            if s_probs.numel() > 1:
+                s_prob = float(s_probs[-1].item())  # Primary endpoint: SR-p53
+            else:
+                s_prob = float(s_probs.item())
         sample_pred = "Toxic" if s_prob >= optimal_threshold else "Non-Toxic"
         sample_conf = s_prob if sample_pred == "Toxic" else (1.0 - s_prob)
 

@@ -75,7 +75,7 @@ class Trainer:
             batch_x = batch.x.to(self.device)
             batch_edge_index = batch.edge_index.to(self.device)
             batch_indicator = batch.batch.to(self.device)
-            targets = batch.y.to(self.device).view(-1, 1).float()  # Align shapes for BCE
+            targets = batch.y.to(self.device).float().reshape(batch.num_graphs, -1)  # Dynamic shape: [B, 1] or [B, 12]
 
             # Reset gradients
             self.optimizer.zero_grad()
@@ -126,7 +126,7 @@ class Trainer:
                 batch_x = batch.x.to(self.device)
                 batch_edge_index = batch.edge_index.to(self.device)
                 batch_indicator = batch.batch.to(self.device)
-                targets = batch.y.to(self.device).view(-1, 1).float()
+                targets = batch.y.to(self.device).float().reshape(batch.num_graphs, -1)
 
                 # Forward pass
                 logits = self.model(

@@ -29,18 +29,38 @@ export interface AuthResponse {
 export interface ImportantAtom {
   index: number;
   element: string;
+  name?: string;
   score: number;
+  rank?: number;
+  influenceType?: string;
+  role?: string;
+  description?: string;
 }
 
 export interface ImportantBond {
   source: number;
   target: number;
   score: number;
+  rank?: number;
+  bondName?: string;
+  influenceType?: string;
+  role?: string;
+  description?: string;
 }
 
 export interface MolecularGraph {
   atoms: { index: number; element: string; x: number; y: number }[];
   bonds: { source: number; target: number }[];
+}
+
+export interface EndpointPrediction {
+  endpoint: string;
+  name: string;
+  category: string;
+  prediction: string;
+  probability: number;
+  confidence: number;
+  threshold: number;
 }
 
 export type PredictionResult = string;
@@ -55,8 +75,10 @@ export interface Prediction {
   threshold?: number;
   endpoint?: string;
   inferenceTimeMs?: number | null;
+  endpoints?: EndpointPrediction[];
   importantAtoms: ImportantAtom[];
   importantBonds: ImportantBond[];
+  explanationSummary?: string;
   molecularGraph?: MolecularGraph;
   explanationImage?: string;
   totalResponseTimeMs?: number;

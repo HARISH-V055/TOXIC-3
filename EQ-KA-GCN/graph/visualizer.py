@@ -55,7 +55,13 @@ def print_graph_info(graph: Data) -> None:
     num_nodes = graph.num_nodes
     num_edges = graph.num_edges
     feature_dim = graph.num_node_features
-    label = graph.y.item() if graph.y is not None else "N/A"
+    if graph.y is not None:
+        if graph.y.numel() > 1:
+            label = f"{graph.y.numel()}-task vector (pos: {int((graph.y == 1).sum().item())})"
+        else:
+            label = graph.y.item()
+    else:
+        label = "N/A"
 
     logger.info("==================================================================")
     logger.info("MOLECULAR GRAPH REPRESENTATION SUMMARY")

@@ -46,28 +46,41 @@ export const predictToxicity = async (
     const importantAtoms = (data.importantAtoms ?? data.important_atoms ?? []).map((a: any) => ({
       index: typeof a === 'number' ? a : (a.index ?? a.atom_index ?? 0),
       element: typeof a === 'number' ? 'C' : (a.element ?? a.atom_symbol ?? 'C'),
+      name: typeof a === 'object' ? (a.name ?? a.atom_name) : undefined,
       score: typeof a === 'number' ? 1.0 : (typeof a.score === 'number' ? a.score : (a.importance_score ?? 1.0)),
+      rank: typeof a === 'object' ? a.rank : undefined,
+      influenceType: typeof a === 'object' ? (a.influenceType ?? a.influence_type) : undefined,
+      role: typeof a === 'object' ? a.role : undefined,
+      description: typeof a === 'object' ? a.description : undefined,
     }));
 
     const importantBonds = (data.importantBonds ?? data.important_bonds ?? []).map((b: any) => ({
       source: b.source ?? b.atomA ?? b.u ?? 0,
       target: b.target ?? b.atomB ?? b.v ?? 0,
       score: typeof b.score === 'number' ? b.score : (b.weight ?? b.importance_score ?? 1.0),
+      rank: b.rank,
+      bondName: b.bondName ?? b.bond_name,
+      influenceType: b.influenceType ?? b.influence_type,
+      role: b.role,
+      description: b.description,
     }));
 
     const molecularGraph = data.molecularGraph ?? data.molecular_graph ?? { atoms: [], bonds: [] };
     const inferenceTimeMs = data.inferenceTimeMs ?? data.inference_time_ms ?? data.executionTime ?? data.execution_time ?? 0;
+    const explanationSummary = data.explanationSummary ?? data.explanation_summary;
 
     return {
       smiles: data.smiles ?? request.smiles,
       prediction: data.prediction,
       probability: data.probability,
       confidence: data.confidence,
-      threshold: data.threshold ?? 0.75,
-      endpoint: data.endpoint ?? 'Tox21 SR-p53',
+      threshold: data.threshold ?? 0.5,
+      endpoint: data.endpoint ?? 'Tox21 (12 Endpoints)',
       inferenceTimeMs,
+      endpoints: data.endpoints,
       importantAtoms,
       importantBonds,
+      explanationSummary,
       molecularGraph,
       explanationImage: data.explanationImage ?? data.explanation_image ?? '/outputs/explanations/molecule_explanation.png',
     };
@@ -111,11 +124,16 @@ export const explainPrediction = async (
 export const getAIServiceStatus = async (): Promise<{
   status: 'online' | 'offline';
   version?: string;
+  modelLoaded?: boolean;
 }> => {
   try {
     const { data } = await aiClient.get('/health', { timeout: 3000 });
-    return { status: 'online', version: data?.version };
+    return {
+      status: 'online',
+      version: data?.version,
+      modelLoaded: Boolean(data?.modelLoaded ?? data?.model_loaded),
+    };
   } catch {
-    return { status: 'offline' };
+    return { status: 'offline', modelLoaded: false };
   }
 };

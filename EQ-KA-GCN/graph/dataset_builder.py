@@ -30,7 +30,10 @@ class DatasetBuilder:
         self.valid_count = 0
 
     def build_dataset(
-        self, csv_path: Union[str, Path], smiles_column: str, target_column: str
+        self,
+        csv_path: Union[str, Path],
+        smiles_column: str,
+        target_column: Union[str, List[str]],
     ) -> List[Data]:
         """
         Loads the preprocessed dataset, converts each row to a PyTorch Geometric Graph,
@@ -39,7 +42,7 @@ class DatasetBuilder:
         Args:
             csv_path (Union[str, Path]): Path to the processed CSV dataset.
             smiles_column (str): Name of the column containing SMILES strings.
-            target_column (str): Name of the column containing target endpoint labels.
+            target_column (Union[str, List[str]]): Name(s) of the column(s) containing target endpoint labels.
 
         Returns:
             List[Data]: A list of valid PyTorch Geometric Data objects.
@@ -61,11 +64,16 @@ class DatasetBuilder:
         self.valid_count = 0
         graphs: List[Data] = []
 
+        is_multitask = isinstance(target_column, list)
+
         # Process SMILES with progress bar
         print("Processing Molecules...")
         for _, row in tqdm(df.iterrows(), total=total_samples, desc="Generating Graphs"):
             smiles = str(row[smiles_column]).strip()
-            label = int(row[target_column])
+            if is_multitask:
+                label = [float(row[col]) for col in target_column]
+            else:
+                label = float(row[target_column])
 
             # Convert SMILES to PyG Data graph object
             graph_data = smiles_to_graph(smiles, label)

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { MdScience, MdTrendingUp, MdLayers, MdBook, MdMenuBook, MdCloudUpload } from 'react-icons/md';
-import { TbCpu, TbArrowRight } from 'react-icons/tb';
+import { TbArrowRight } from 'react-icons/tb';
 import { useAuthStore } from '@store/useAuthStore';
 import { usePredictions } from '@hooks/usePredictions';
 import { StatsCard } from '@components/dashboard/StatsCard';
@@ -46,7 +46,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatsCard
           title="Prediction Accuracy"
           value="88.9%"
@@ -70,14 +70,6 @@ const Dashboard: React.FC = () => {
           icon={<MdLayers />}
           iconBg="from-violet-500 to-purple-600"
           delay={0.1}
-        />
-        <StatsCard
-          title="GPU Status"
-          value="RTX 4090"
-          subtitle="Active - quantized INT8"
-          icon={<TbCpu />}
-          iconBg="from-orange-500 to-amber-600"
-          delay={0.15}
         />
       </div>
 

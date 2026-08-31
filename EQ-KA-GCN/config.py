@@ -33,13 +33,13 @@ class PathConfig:
 
 @dataclass
 class ModelConfig:
-    """Hyperparameters for the baseline GCN model."""
+    """Hyperparameters for the GCN/KA-GCN models."""
     name: str = "BaselineGCN"
     save_filename: str = "eq_ka_gcn_best.pt"
     input_dim: int = 32   # 32 node features (one-hot symbol, hybridization, degree + scalar properties)
     edge_attr_dim: int = 6  # 6 bond features (bond type one-hot, conjugation, ring membership)
     hidden_dim: int = 128
-    output_dim: int = 1  # Binary prediction (toxic/non-toxic)
+    output_dim: int = 12  # Multi-task binary predictions (all 12 Tox21 endpoints)
     dropout: float = 0.3
     num_gcn_layers: int = 2
 
@@ -54,8 +54,8 @@ class TrainingConfig:
     learning_rate: float = 0.001
     weight_decay: float = 1e-4
     epochs: int = 100
-    early_stopping_patience: int = 25  # Increased: Focal Loss needs more epochs to converge
-    early_stopping: int = 25           # Increased: Focal Loss needs more epochs to converge
+    early_stopping_patience: int = 25  # Focal Loss needs more epochs to converge
+    early_stopping: int = 25
     train_ratio: float = 0.8
     val_ratio: float = 0.1
     test_ratio: float = 0.1
@@ -78,6 +78,38 @@ class QuantizationConfig:
     qat_report_filename: str = "quantization_report.json"
 
 
+# Tox21 Standard Endpoints (7 Nuclear Receptors + 5 Stress Response Pathways)
+TOX21_ENDPOINTS = [
+    "NR-AR",
+    "NR-AR-LBD",
+    "NR-AhR",
+    "NR-Aromatase",
+    "NR-ER",
+    "NR-ER-LBD",
+    "NR-PPAR-gamma",
+    "SR-ARE",
+    "SR-ATAD5",
+    "SR-HSE",
+    "SR-MMP",
+    "SR-p53",
+]
+
+ENDPOINT_INFO = {
+    "NR-AR": {"name": "Androgen Receptor", "category": "Nuclear Receptor"},
+    "NR-AR-LBD": {"name": "Androgen Receptor (LBD)", "category": "Nuclear Receptor"},
+    "NR-AhR": {"name": "Aryl Hydrocarbon Receptor", "category": "Nuclear Receptor"},
+    "NR-Aromatase": {"name": "Aromatase Enzyme", "category": "Nuclear Receptor"},
+    "NR-ER": {"name": "Estrogen Receptor", "category": "Nuclear Receptor"},
+    "NR-ER-LBD": {"name": "Estrogen Receptor (LBD)", "category": "Nuclear Receptor"},
+    "NR-PPAR-gamma": {"name": "PPAR-gamma Receptor", "category": "Nuclear Receptor"},
+    "SR-ARE": {"name": "Antioxidant Response Element", "category": "Stress Response"},
+    "SR-ATAD5": {"name": "ATAD5 (DNA Damage)", "category": "Stress Response"},
+    "SR-HSE": {"name": "Heat Shock Element", "category": "Stress Response"},
+    "SR-MMP": {"name": "Mitochondrial Disruption", "category": "Stress Response"},
+    "SR-p53": {"name": "p53 (Tumor Suppressor / DNA Damage)", "category": "Stress Response"},
+}
+
+
 @dataclass
 class DataConfig:
     """Configuration for dataset parameters."""
@@ -89,10 +121,9 @@ class DataConfig:
     val_graphs_filename: str = "validation_graphs.pt"
     test_graphs_filename: str = "test_graphs.pt"
     smiles_column: str = "SMILES"
-    target_column: str = "SR-p53"
-
-
-
+    target_column: str = "SR-p53"  # Primary default endpoint
+    target_columns: List[str] = field(default_factory=lambda: list(TOX21_ENDPOINTS))
+    num_tasks: int = 12
 
 
 @dataclass
@@ -113,13 +144,13 @@ class FourierKANConfig:
     activation: str = "silu"
     save_filename: str = "ka_gcn_best.pt"
     history_filename: str = "ka_gcn_history.csv"
-    use_weighted_loss: bool = False  # Disabled: Focal Loss supersedes class weighting
+    use_weighted_loss: bool = False
     weighted_save_filename: str = "ka_gcn_weighted_best.pt"
     weighted_history_filename: str = "ka_gcn_weighted_history.csv"
-    # Focal Loss settings (replaces class weighting for better imbalance handling)
+    # Focal Loss settings (multi-task element-wise focal loss)
     use_focal_loss: bool = True
-    focal_alpha: float = 0.75   # Weight for toxic (positive) class — must be HIGH for 18:1 imbalance
-    focal_gamma: float = 2.0    # Focusing parameter (higher = focus on hard examples)
+    focal_alpha: float = 0.75   # Weight for toxic (positive) class across endpoints
+    focal_gamma: float = 2.0    # Focusing parameter for hard examples
     focal_save_filename: str = "eq_ka_gcn_focal_best.pt"
     focal_history_filename: str = "focal_history.csv"
 

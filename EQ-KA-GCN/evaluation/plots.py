@@ -18,6 +18,7 @@ from sklearn.metrics import (
     average_precision_score,
     precision_recall_curve,
     roc_curve,
+    roc_auc_score,
 )
 
 # Use 'Agg' non-interactive backend to avoid window rendering blocks
@@ -94,7 +95,8 @@ def plot_accuracy_curve(history_path: str, save_path: str) -> None:
 
 def plot_roc_curve(y_true: np.ndarray, y_prob: np.ndarray, save_path: str) -> None:
     """
-    Plots test Receiver Operating Characteristic (ROC) curve.
+    Plots test Receiver Operating Characteristic (ROC) curve(s).
+    Supports 1D or 2D multi-task predictions.
 
     Args:
         y_true (np.ndarray): True target binary labels.
@@ -103,28 +105,46 @@ def plot_roc_curve(y_true: np.ndarray, y_prob: np.ndarray, save_path: str) -> No
     """
     logger.info("Generating ROC Curve...")
     try:
-        fpr, tpr, _ = roc_curve(y_true, y_prob)
-        auc_score = 0.5
-        if len(np.unique(y_true)) > 1:
-            from sklearn.metrics import roc_auc_score
-            auc_score = roc_auc_score(y_true, y_prob)
-            
-        plt.figure(figsize=(6, 6))
-        plt.plot(fpr, tpr, color="#d62728", label=f"Baseline GCN (AUC = {auc_score:.4f})", linewidth=2.5)
-        plt.plot([0, 1], [0, 1], color="#7f7f7f", linestyle=":", label="Random Guess (AUC = 0.5000)")
-        
+        from config import TOX21_ENDPOINTS
+        plt.figure(figsize=(7, 6))
+
+        if y_true.ndim == 1 or y_true.shape[1] == 1:
+            yt = y_true.ravel()
+            yp = y_prob.ravel()
+            fpr, tpr, _ = roc_curve(yt, yp)
+            auc_score = roc_auc_score(yt, yp) if len(np.unique(yt)) > 1 else 0.5
+            plt.plot(fpr, tpr, color="#d62728", label=f"KA-GCN (AUC = {auc_score:.4f})", linewidth=2.5)
+        else:
+            num_tasks = y_true.shape[1]
+            auc_list = []
+            colors = plt.cm.tab20.colors
+
+            for i in range(num_tasks):
+                yt_i = y_true[:, i]
+                yp_i = y_prob[:, i]
+                name = TOX21_ENDPOINTS[i] if i < len(TOX21_ENDPOINTS) else f"T{i}"
+                if len(np.unique(yt_i)) > 1:
+                    fpr_i, tpr_i, _ = roc_curve(yt_i, yp_i)
+                    auc_i = roc_auc_score(yt_i, yp_i)
+                    auc_list.append(auc_i)
+                    plt.plot(fpr_i, tpr_i, color=colors[i % len(colors)], label=f"{name} ({auc_i:.2f})", alpha=0.7, linewidth=1.5)
+
+            macro_auc = float(np.mean(auc_list)) if auc_list else 0.5
+            plt.plot([], [], ' ', label=f"Macro-Avg AUC = {macro_auc:.4f}")
+
+        plt.plot([0, 1], [0, 1], color="#7f7f7f", linestyle=":", label="Random Guess (0.50)")
         plt.xlim([-0.02, 1.02])
         plt.ylim([-0.02, 1.02])
-        plt.title("Receiver Operating Characteristic (ROC)", fontsize=13, fontweight="bold", pad=15)
+        plt.title("Multi-Task ROC Curves (Tox21 12 Endpoints)", fontsize=13, fontweight="bold", pad=15)
         plt.xlabel("False Positive Rate (FPR)", fontsize=11)
         plt.ylabel("True Positive Rate (TPR)", fontsize=11)
         plt.grid(True, linestyle=":", alpha=0.6)
-        plt.legend(loc="lower right", fontsize=10)
+        plt.legend(loc="lower right", fontsize=8, ncol=2)
         plt.tight_layout()
-        
+
         save_file = Path(save_path)
         save_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         plt.savefig(save_file, dpi=300)
         plt.close()
         logger.info(f"ROC Curve successfully saved at: {save_path}")
@@ -143,24 +163,39 @@ def plot_precision_recall_curve(y_true: np.ndarray, y_prob: np.ndarray, save_pat
     """
     logger.info("Generating Precision-Recall Curve...")
     try:
-        precision_vals, recall_vals, _ = precision_recall_curve(y_true, y_prob)
-        avg_precision = average_precision_score(y_true, y_prob)
-        
-        plt.figure(figsize=(6, 6))
-        plt.plot(recall_vals, precision_vals, color="#9467bd", label=f"Baseline GCN (AP = {avg_precision:.4f})", linewidth=2.5)
-        
+        from config import TOX21_ENDPOINTS
+        plt.figure(figsize=(7, 6))
+
+        if y_true.ndim == 1 or y_true.shape[1] == 1:
+            yt = y_true.ravel()
+            yp = y_prob.ravel()
+            precision_vals, recall_vals, _ = precision_recall_curve(yt, yp)
+            avg_precision = average_precision_score(yt, yp)
+            plt.plot(recall_vals, precision_vals, color="#9467bd", label=f"KA-GCN (AP = {avg_precision:.4f})", linewidth=2.5)
+        else:
+            num_tasks = y_true.shape[1]
+            colors = plt.cm.tab20.colors
+            for i in range(num_tasks):
+                yt_i = y_true[:, i]
+                yp_i = y_prob[:, i]
+                name = TOX21_ENDPOINTS[i] if i < len(TOX21_ENDPOINTS) else f"T{i}"
+                if len(np.unique(yt_i)) > 1:
+                    p_vals, r_vals, _ = precision_recall_curve(yt_i, yp_i)
+                    ap_i = average_precision_score(yt_i, yp_i)
+                    plt.plot(r_vals, p_vals, color=colors[i % len(colors)], label=f"{name} (AP={ap_i:.2f})", alpha=0.7, linewidth=1.5)
+
         plt.xlim([-0.02, 1.02])
         plt.ylim([-0.02, 1.02])
-        plt.title("Precision-Recall (PR) Curve", fontsize=13, fontweight="bold", pad=15)
+        plt.title("Multi-Task Precision-Recall Curves", fontsize=13, fontweight="bold", pad=15)
         plt.xlabel("Recall", fontsize=11)
         plt.ylabel("Precision", fontsize=11)
         plt.grid(True, linestyle=":", alpha=0.6)
-        plt.legend(loc="upper right", fontsize=10)
+        plt.legend(loc="upper right", fontsize=8, ncol=2)
         plt.tight_layout()
-        
+
         save_file = Path(save_path)
         save_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         plt.savefig(save_file, dpi=300)
         plt.close()
         logger.info(f"PR Curve successfully saved at: {save_path}")
@@ -168,19 +203,23 @@ def plot_precision_recall_curve(y_true: np.ndarray, y_prob: np.ndarray, save_pat
         logger.error(f"Failed to generate PR Curve: {str(e)}")
 
 
-def plot_confusion_matrix(cm: List[List[int]], save_path: str) -> None:
+def plot_confusion_matrix(cm: object, save_path: str) -> None:
     """
-    Plots a Confusion Matrix heatmap.
+    Plots a Confusion Matrix heatmap if single-task matrix is provided.
 
     Args:
-        cm (List[List[int]]): 2x2 confusion matrix array representation.
+        cm: 2x2 confusion matrix array representation or dict.
         save_path (str): Target path to save confusion_matrix.png.
     """
+    if cm is None or not isinstance(cm, (list, np.ndarray)):
+        return
     logger.info("Generating Confusion Matrix Heatmap...")
     try:
         cm_array = np.array(cm)
+        if cm_array.shape != (2, 2):
+            return
         plt.figure(figsize=(6, 5))
-        
+
         sns.heatmap(
             cm_array,
             annot=True,
@@ -191,15 +230,15 @@ def plot_confusion_matrix(cm: List[List[int]], save_path: str) -> None:
             yticklabels=["Non-Toxic", "Toxic"],
             annot_kws={"size": 13, "weight": "bold"},
         )
-        
+
         plt.title("Confusion Matrix Heatmap", fontsize=13, fontweight="bold", pad=15)
         plt.xlabel("Predicted Class", fontsize=11)
         plt.ylabel("True Class", fontsize=11)
         plt.tight_layout()
-        
+
         save_file = Path(save_path)
         save_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         plt.savefig(save_file, dpi=300)
         plt.close()
         logger.info(f"Confusion Matrix successfully saved at: {save_path}")

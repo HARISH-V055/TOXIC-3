@@ -25,13 +25,23 @@ class PredictRequest(BaseModel):
 class ImportantAtom(BaseCamelModel):
     index: int = Field(..., description="Atom index")
     element: str = Field(..., description="Element symbol")
+    name: Optional[str] = Field(None, description="Full element name (e.g. Oxygen)")
     score: float = Field(..., description="GNNExplainer importance score")
+    rank: Optional[int] = Field(None, description="Importance rank (1 = highest)")
+    influence_type: Optional[str] = Field(None, description="'Toxicity' or 'Non-Toxicity'")
+    role: Optional[str] = Field(None, description="Role: 'Toxicity Driver (Toxicophore)' or 'Safety / Non-Toxicity Stabilizer'")
+    description: Optional[str] = Field(None, description="Chemical mechanistic explanation")
 
 
 class ImportantBond(BaseCamelModel):
     source: int = Field(..., description="Source atom index")
     target: int = Field(..., description="Target atom index")
     score: float = Field(..., description="GNNExplainer importance score")
+    rank: Optional[int] = Field(None, description="Importance rank")
+    bond_name: Optional[str] = Field(None, description="Bond label e.g. 'C(#1) — O(#2)'")
+    influence_type: Optional[str] = Field(None, description="'Toxicity' or 'Non-Toxicity'")
+    role: Optional[str] = Field(None, description="Role: 'Toxicity-Propagating Bond' or 'Structural Safety Stabilizer'")
+    description: Optional[str] = Field(None, description="Chemical mechanistic description")
 
 
 class GraphAtom(BaseCamelModel):
@@ -51,17 +61,29 @@ class MolecularGraph(BaseCamelModel):
     bonds: List[GraphBond] = Field(default_factory=list)
 
 
+class EndpointPrediction(BaseCamelModel):
+    endpoint: str = Field(..., description="Endpoint identifier (e.g. NR-AR, SR-p53)")
+    name: str = Field(..., description="Full biological target name")
+    category: str = Field(..., description="'Nuclear Receptor' or 'Stress Response'")
+    prediction: str = Field(..., description="'Toxic / Active' or 'Non-Toxic / Inactive'")
+    probability: float = Field(..., ge=0.0, le=1.0, description="Assay activity probability")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
+    threshold: float = Field(default=0.5, description="Decision threshold")
+
+
 class PredictResponse(BaseCamelModel):
     """Output schema for toxicity prediction."""
     smiles: str = Field(..., description="SMILES string")
     prediction: str = Field(..., description="'Toxic' or 'Non-Toxic'")
     probability: float = Field(..., ge=0.0, le=1.0, description="Toxicity probability")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Model confidence score")
-    threshold: float = Field(default=0.75, description="Classification decision threshold")
-    endpoint: str = Field(default="Tox21 SR-p53", description="Target bioassay endpoint")
+    threshold: float = Field(default=0.5, description="Classification decision threshold")
+    endpoint: str = Field(default="Tox21 (12 Endpoints)", description="Target bioassay endpoint")
     inference_time_ms: float = Field(..., description="Model inference time in milliseconds")
+    endpoints: List[EndpointPrediction] = Field(default_factory=list, description="Predictions across all 12 Tox21 assay endpoints")
     important_atoms: List[ImportantAtom] = Field(default_factory=list)
     important_bonds: List[ImportantBond] = Field(default_factory=list)
+    explanation_summary: Optional[str] = Field(default=None, description="Mechanistic explanation of atoms influencing toxicity or non-toxicity")
     molecular_graph: MolecularGraph = Field(default_factory=MolecularGraph)
     explanation_image: str = Field(default="/outputs/explanations/molecule_explanation.png")
 
@@ -77,6 +99,10 @@ class ExplainRequest(BaseModel):
     prediction_id: Optional[str] = Field(
         None,
         description="Optional reference to a stored prediction",
+    )
+    target_endpoint: Optional[str] = Field(
+        default="SR-p53",
+        description="Specific endpoint to explain (e.g. SR-p53, NR-AR, etc.)",
     )
 
 

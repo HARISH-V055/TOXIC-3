@@ -57,15 +57,20 @@ export const getModelStatus = async (_req: Request, res: Response, next: NextFun
       ModelInformation.getActive(),
     ]);
 
+    const isServiceOnline = serviceStatus.status === 'online';
+    const isModelLoaded = Boolean(serviceStatus.modelLoaded);
+
     sendSuccess(
       res,
       {
         service: serviceStatus,
         model: modelInfo ?? {
-          version: '0.0.0-placeholder',
+          version: serviceStatus.version || '0.1.0-quantized',
           name: 'EQ-KA-GCN',
-          status: 'offline',
-          description: 'AI model integration pending. Architecture ready for deployment.',
+          status: (isServiceOnline && isModelLoaded) ? 'active' : 'offline',
+          description: (isServiceOnline && isModelLoaded)
+            ? 'EQ-KA-GCN with Fourier-KAN & Quantization-Aware Training active.'
+            : 'AI model integration pending. Architecture ready for deployment.',
         },
       },
       'Model status retrieved'

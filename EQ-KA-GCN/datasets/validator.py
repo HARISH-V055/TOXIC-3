@@ -11,14 +11,19 @@ import pandas as pd
 logger = logging.getLogger("EQ-KA-GCN.datasets.validator")
 
 
-def validate_dataset(df: pd.DataFrame, smiles_column: str, target_column: str) -> None:
+from typing import List, Union
+
+
+def validate_dataset(
+    df: pd.DataFrame, smiles_column: str, target_column: Union[str, List[str]]
+) -> None:
     """
     Validates that the required columns exist in the DataFrame.
 
     Args:
         df (pd.DataFrame): The loaded dataset DataFrame.
         smiles_column (str): Name of the SMILES column to validate.
-        target_column (str): Name of the target toxicity endpoint column to validate.
+        target_column (Union[str, List[str]]): Name(s) of target toxicity endpoint column(s).
 
     Raises:
         ValueError: If required columns are missing, or if the DataFrame is empty.
@@ -36,11 +41,13 @@ def validate_dataset(df: pd.DataFrame, smiles_column: str, target_column: str) -
         raise ValueError(err_msg)
 
     # Validate column names
+    targets = [target_column] if isinstance(target_column, str) else list(target_column)
     missing_columns = []
     if smiles_column not in df.columns:
         missing_columns.append(smiles_column)
-    if target_column not in df.columns:
-        missing_columns.append(target_column)
+    for t in targets:
+        if t not in df.columns:
+            missing_columns.append(t)
 
     if missing_columns:
         err_msg = (
@@ -51,6 +58,6 @@ def validate_dataset(df: pd.DataFrame, smiles_column: str, target_column: str) -
         raise ValueError(err_msg)
 
     logger.info(
-        f"Dataset validation successful. Found target column: '{target_column}' "
+        f"Dataset validation successful. Found target column(s): {targets} "
         f"and SMILES column: '{smiles_column}'."
     )

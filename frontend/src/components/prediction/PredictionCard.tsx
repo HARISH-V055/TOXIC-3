@@ -96,9 +96,11 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
               ? `${prediction.importantAtoms.length} atoms highlighted`
               : 'No highlights'}
           </span>
-          {prediction.executionTime !== null && (
-            <span>{prediction.executionTime.toFixed(0)}ms</span>
-          )}
+          {(prediction.inferenceTimeMs !== null && prediction.inferenceTimeMs !== undefined) ? (
+            <span>{prediction.inferenceTimeMs.toFixed(0)}ms</span>
+          ) : (prediction.totalResponseTimeMs ? (
+            <span>{prediction.totalResponseTimeMs.toFixed(0)}ms</span>
+          ) : null)}
         </div>
       )}
     </Card>

@@ -74,12 +74,7 @@ class ThresholdOptimizer:
         )
 
         thresholds = np.arange(self.search_start, self.search_end + 1e-5, self.step)
-
-        # Calculate ROC-AUC once (constant for reference)
-        if len(np.unique(y_true)) > 1:
-            auc_val = float(roc_auc_score(y_true, y_prob))
-        else:
-            auc_val = 0.5
+        from models.metrics import calculate_metrics
 
         records: List[Dict[str, Any]] = []
 
@@ -87,22 +82,17 @@ class ThresholdOptimizer:
             t = float(np.round(thresh, 4))
             y_pred = (y_prob >= t).astype(int)
 
-            acc = float(accuracy_score(y_true, y_pred))
-            prec = float(precision_score(y_true, y_pred, zero_division=0))
-            rec = float(recall_score(y_true, y_pred, zero_division=0))
-            f1 = float(f1_score(y_true, y_pred, zero_division=0))
-            bal_acc = float(balanced_accuracy_score(y_true, y_pred))
-            mcc = float(matthews_corrcoef(y_true, y_pred))
+            metrics = calculate_metrics(y_true=y_true, y_pred=y_pred, y_prob=y_prob)
 
             records.append({
                 "Threshold": t,
-                "Accuracy": acc,
-                "Precision": prec,
-                "Recall": rec,
-                "F1": f1,
-                "Balanced Accuracy": bal_acc,
-                "MCC": mcc,
-                "ROC-AUC": auc_val,
+                "Accuracy": float(metrics.get("accuracy", 0.0)),
+                "Precision": float(metrics.get("precision", 0.0)),
+                "Recall": float(metrics.get("recall", 0.0)),
+                "F1": float(metrics.get("f1_score", 0.0)),
+                "Balanced Accuracy": float(metrics.get("balanced_accuracy", 0.0)),
+                "MCC": float(metrics.get("mcc", 0.0)),
+                "ROC-AUC": float(metrics.get("roc_auc", 0.5)),
             })
 
         df_results = pd.DataFrame(records)
