@@ -190,8 +190,7 @@ def plot_explainability_figures(
     num_nodes = x.size(0)
 
     for i in range(num_nodes):
-        atomic_num = int(x[i][0].item())
-        sym, _ = decode_atom_info(atomic_num)
+        sym, name, _ = decode_atom_info(x[i], i)
         G.add_node(i, label=f"{sym}{i}", score=node_importance[i])
 
     seen_e = set()

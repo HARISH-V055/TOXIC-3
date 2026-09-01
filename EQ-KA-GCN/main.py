@@ -409,6 +409,7 @@ def run_pipeline() -> None:
             input_dim=config.model.input_dim,
             hidden_dim=config.model.hidden_dim,
             output_dim=config.model.output_dim,
+            fp_dim=config.model.fp_dim if config.model.use_fingerprint else 0,
             gcn_dropout=config.model.dropout,
             kan_hidden_dim=config.fourier_kan.hidden_dim,
             fourier_order=config.fourier_kan.fourier_order,

@@ -76,6 +76,9 @@ class Trainer:
             batch_edge_index = batch.edge_index.to(self.device)
             batch_indicator = batch.batch.to(self.device)
             targets = batch.y.to(self.device).float().reshape(batch.num_graphs, -1)  # Dynamic shape: [B, 1] or [B, 12]
+            batch_fp = getattr(batch, "fp", None)
+            if batch_fp is not None:
+                batch_fp = batch_fp.to(self.device).float().reshape(batch.num_graphs, -1)
 
             # Reset gradients
             self.optimizer.zero_grad()
@@ -85,6 +88,7 @@ class Trainer:
                 x=batch_x,
                 edge_index=batch_edge_index,
                 batch=batch_indicator,
+                fp=batch_fp,
                 return_logits=True,
             )
 
@@ -127,12 +131,16 @@ class Trainer:
                 batch_edge_index = batch.edge_index.to(self.device)
                 batch_indicator = batch.batch.to(self.device)
                 targets = batch.y.to(self.device).float().reshape(batch.num_graphs, -1)
+                batch_fp = getattr(batch, "fp", None)
+                if batch_fp is not None:
+                    batch_fp = batch_fp.to(self.device).float().reshape(batch.num_graphs, -1)
 
                 # Forward pass
                 logits = self.model(
                     x=batch_x,
                     edge_index=batch_edge_index,
                     batch=batch_indicator,
+                    fp=batch_fp,
                     return_logits=True,
                 )
 

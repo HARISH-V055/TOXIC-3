@@ -82,11 +82,16 @@ class GNNExplainerModule:
         x: torch.Tensor = graph.x.to(device).float()
         edge_index: torch.Tensor = graph.edge_index.to(device)
         batch: torch.Tensor = torch.zeros(x.size(0), dtype=torch.long, device=device)
+        fp: Optional[torch.Tensor] = getattr(graph, "fp", None)
+        if fp is not None:
+            fp = fp.to(device).float()
+            if fp.dim() == 1:
+                fp = fp.unsqueeze(0)
 
         # 2. Get Original Model Prediction with Configured Threshold
         with torch.no_grad():
             try:
-                orig_logits = model(x=x, edge_index=edge_index, batch=batch, return_logits=True)
+                orig_logits = model(x=x, edge_index=edge_index, batch=batch, fp=fp, return_logits=True)
             except Exception as e:
                 logger.error(f"Failed forward pass during GNNExplainer initialization: {e}")
                 raise RuntimeError(f"Model forward pass failed: {e}") from e
@@ -124,6 +129,7 @@ class GNNExplainerModule:
                     x=x_masked,
                     edge_index=edge_index,
                     batch=batch,
+                    fp=fp,
                     return_logits=True,
                     edge_weight=edge_mask,
                 )

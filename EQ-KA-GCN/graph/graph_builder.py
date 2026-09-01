@@ -12,9 +12,11 @@ Upgrade: Now includes 6-dimensional edge (bond) features:
 
 import logging
 from typing import Optional
+import numpy as np
 import torch
 from torch_geometric.data import Data
 from rdkit import Chem
+from rdkit.Chem import AllChem
 
 from graph.feature_extractor import extract_node_features
 
@@ -59,8 +61,8 @@ def get_bond_features(bond: Chem.Bond) -> list:
 
 def smiles_to_graph(smiles: str, label: Optional[object] = 0) -> Optional[Data]:
     """
-    Parses a SMILES string, extracts node features, bond features, and connectivity,
-    and returns a PyTorch Geometric Data object representing the molecule.
+    Parses a SMILES string, extracts node features, bond features, ECFP4 fingerprint,
+    and connectivity, and returns a PyTorch Geometric Data object representing the molecule.
 
     Args:
         smiles (str): SMILES string representation of the molecule.
@@ -72,7 +74,9 @@ def smiles_to_graph(smiles: str, label: Optional[object] = 0) -> Optional[Data]:
                         - x: Node feature tensor [num_atoms, 32]
                         - edge_index: Graph connectivity tensor [2, 2 * num_bonds]
                         - edge_attr: Bond feature tensor [2 * num_bonds, 6]
+                        - fp: 1024-bit ECFP4 fingerprint tensor [1024]
                         - y: Label tensor [1] or [12]
+                        - smiles: SMILES string representation
                         Returns None if the SMILES string is invalid or cannot be parsed.
     """
     # 1. Parse SMILES
@@ -113,7 +117,18 @@ def smiles_to_graph(smiles: str, label: Optional[object] = 0) -> Optional[Data]:
         edge_index = torch.empty((2, 0), dtype=torch.long)
         edge_attr = torch.empty((0, 6), dtype=torch.float)
 
-    # 5. Construct label tensor (supports scalar or multi-task 12-task vector)
+    # 5. Extract 1024-bit Morgan ECFP4 fingerprint (radius=2)
+    try:
+        fp_arr = np.zeros((1024,), dtype=np.float32)
+        bit_vect = AllChem.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=1024)
+        for bit_idx in bit_vect.GetOnBits():
+            fp_arr[bit_idx] = 1.0
+        fp = torch.tensor(fp_arr, dtype=torch.float).unsqueeze(0)  # Shape [1, 1024]
+    except Exception as e:
+        logger.warning(f"Error computing ECFP4 fingerprint for '{smiles}': {e}")
+        fp = torch.zeros((1, 1024), dtype=torch.float)
+
+    # 6. Construct label tensor (supports scalar or multi-task 12-task vector)
     if label is None:
         y = torch.tensor([0.0], dtype=torch.float)
     elif isinstance(label, (list, tuple)):
@@ -125,7 +140,7 @@ def smiles_to_graph(smiles: str, label: Optional[object] = 0) -> Optional[Data]:
     else:
         y = torch.tensor([float(label)], dtype=torch.float)
 
-    # 6. Create PyTorch Geometric Data object with edge features
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
+    # 7. Create PyTorch Geometric Data object with edge features and fingerprint
+    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, fp=fp, y=y, smiles=smiles)
 
     return data

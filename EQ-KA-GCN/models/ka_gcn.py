@@ -51,6 +51,7 @@ class KAGCN(nn.Module):
         input_dim: int,
         hidden_dim: int = 128,
         output_dim: int = 1,
+        fp_dim: int = 1024,
         gcn_dropout: float = 0.3,
         kan_hidden_dim: int = 64,
         fourier_order: int = 5,
@@ -63,7 +64,8 @@ class KAGCN(nn.Module):
         Args:
             input_dim (int): Dimensionality of input node features.
             hidden_dim (int): Dimensionality of GCN hidden layers.
-            output_dim (int): Output dimension (1 for binary classification).
+            output_dim (int): Output dimension (12 for multi-task Tox21).
+            fp_dim (int): Dimensionality of ECFP4 Morgan fingerprint (1024-bit).
             gcn_dropout (float): Dropout probability for GCN layers.
             kan_hidden_dim (int): Hidden dimension for the FourierKAN classifier.
             fourier_order (int): Order/grid size of Fourier harmonics.
@@ -71,6 +73,7 @@ class KAGCN(nn.Module):
             kan_activation (str): Activation function after FourierKAN layer.
         """
         super().__init__()
+        self.fp_dim = fp_dim
 
         # First GCN Layer
         self.conv1 = GCNConv(in_channels=input_dim, out_channels=hidden_dim)
@@ -83,11 +86,13 @@ class KAGCN(nn.Module):
         self.bn2 = nn.BatchNorm1d(num_features=hidden_dim)
         self.relu2 = nn.ReLU()
 
-        # Multi-scale pooling projection: 3×hidden_dim → hidden_dim
+        # Hybrid Cross-Modal Fusion projection: (3×hidden_dim + fp_dim) → hidden_dim
+        fusion_input_dim = (hidden_dim * 3) + fp_dim
         self.pool_proj = nn.Sequential(
-            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.Linear(fusion_input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Dropout(p=0.2),
         )
 
         # FourierKAN Layer
@@ -120,16 +125,18 @@ class KAGCN(nn.Module):
         x: torch.Tensor,
         edge_index: torch.Tensor,
         batch: torch.Tensor,
+        fp: Optional[torch.Tensor] = None,
         return_logits: bool = True,
         edge_weight: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Performs forward propagation on input molecular graphs.
+        Performs forward propagation on input molecular graphs with optional ECFP4 fingerprint fusion.
 
         Args:
             x (torch.Tensor): Node feature tensor of shape [num_nodes, input_dim].
             edge_index (torch.Tensor): Graph edge indices of shape [2, num_edges].
             batch (torch.Tensor): Graph batch indicators of shape [num_nodes].
+            fp (Optional[torch.Tensor]): 1024-bit ECFP4 fingerprint tensor of shape [batch_size, 1024].
             return_logits (bool): If True, returns raw linear logits (for training with BCEWithLogitsLoss).
                                  If False, returns sigmoid-activated probabilities.
             edge_weight (Optional[torch.Tensor]): Optional edge weight tensor of shape [num_edges] for GNNExplainer.
@@ -151,21 +158,32 @@ class KAGCN(nn.Module):
         # 3. Multi-Scale Readout Pooling (captures mean chemistry + local hotspots + size)
         h_mean = global_mean_pool(h2, batch)   # [B, H] average atom signature
         h_max  = global_max_pool(h2, batch)    # [B, H] most activated atom (toxic hotspot)
-        h_sum  = global_add_pool(h2, batch)    # [B, H] size-scaled molecular fingerprint
-        out = torch.cat([h_mean, h_max, h_sum], dim=-1)  # [B, 3H]
+        h_sum  = global_add_pool(h2, batch)    # [B, H] size-scaled molecular representation
+        graph_rep = torch.cat([h_mean, h_max, h_sum], dim=-1)  # [B, 3H]
 
-        # 4. Project back to hidden_dim
-        out = self.pool_proj(out)  # [B, H]
+        # 4. Hybrid Cross-Modal Fusion (Graph Topology + 1024-bit ECFP4 Fingerprints)
+        if self.fp_dim > 0:
+            if fp is not None:
+                fp_reshaped = fp.float().reshape(graph_rep.size(0), self.fp_dim)
+                combined = torch.cat([graph_rep, fp_reshaped], dim=-1)
+            else:
+                dummy_fp = torch.zeros(graph_rep.size(0), self.fp_dim, device=graph_rep.device, dtype=torch.float)
+                combined = torch.cat([graph_rep, dummy_fp], dim=-1)
+        else:
+            combined = graph_rep
 
-        # 5. FourierKAN Classifier Transformation
+        # 5. Project fused vector to hidden_dim
+        out = self.pool_proj(combined)  # [B, H]
+
+        # 6. FourierKAN Classifier Transformation
         out = self.fourier_kan(out)
         out = self.kan_act(out)
         out = self.kan_drop(out)
 
-        # 6. Output Projection Layer
+        # 7. Output Projection Layer
         logits = self.fc_out(out)
 
-        # 7. Output activation logic
+        # 8. Output activation logic
         if return_logits:
             return logits
 

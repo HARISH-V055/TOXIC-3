@@ -94,12 +94,16 @@ class Evaluator:
                 batch_edge_index = batch.edge_index.to(self.device)
                 batch_indicator = batch.batch.to(self.device)
                 targets = batch.y.to(self.device).float().reshape(batch.num_graphs, -1)
+                batch_fp = getattr(batch, "fp", None)
+                if batch_fp is not None:
+                    batch_fp = batch_fp.to(self.device).float().reshape(batch.num_graphs, -1)
 
                 # Model forward pass (obtaining logits)
                 logits = self.model(
                     x=batch_x,
                     edge_index=batch_edge_index,
                     batch=batch_indicator,
+                    fp=batch_fp,
                     return_logits=True,
                 )
 

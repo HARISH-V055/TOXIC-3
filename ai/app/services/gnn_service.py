@@ -110,6 +110,7 @@ class GNNService:
                     input_dim=eq_config.model.input_dim,
                     hidden_dim=eq_config.model.hidden_dim,
                     output_dim=eq_config.model.output_dim,
+                    fp_dim=eq_config.model.fp_dim if eq_config.model.use_fingerprint else 0,
                     gcn_dropout=eq_config.model.dropout,
                     kan_hidden_dim=eq_config.fourier_kan.hidden_dim,
                     fourier_order=eq_config.fourier_kan.fourier_order,
@@ -163,6 +164,11 @@ class GNNService:
 
         graph = graph.to(DEVICE)
         batch = torch.zeros(graph.num_nodes, dtype=torch.long, device=DEVICE)
+        fp = getattr(graph, "fp", None)
+        if fp is not None:
+            fp = fp.to(DEVICE).float()
+            if fp.dim() == 1:
+                fp = fp.unsqueeze(0)
 
         # 2. PyTorch Model Forward Pass (12-endpoint prediction)
         with torch.no_grad():
@@ -170,6 +176,7 @@ class GNNService:
                 x=graph.x,
                 edge_index=graph.edge_index,
                 batch=batch,
+                fp=fp,
                 return_logits=True,
             )
             raw_probs = torch.sigmoid(logits).squeeze()

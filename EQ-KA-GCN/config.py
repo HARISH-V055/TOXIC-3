@@ -42,6 +42,9 @@ class ModelConfig:
     output_dim: int = 12  # Multi-task binary predictions (all 12 Tox21 endpoints)
     dropout: float = 0.3
     num_gcn_layers: int = 2
+    use_fingerprint: bool = True  # Hybrid architecture: Fuse 1024-bit ECFP4 fingerprint
+    fp_dim: int = 1024           # ECFP4 fingerprint bit-length
+    fp_radius: int = 2           # Morgan fingerprint radius (radius 2 = ECFP4)
 
 
 
